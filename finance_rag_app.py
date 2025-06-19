@@ -66,20 +66,22 @@ class Config:
     CHUNK_OVERLAP = 200
     MAX_BATCH_SIZE = 50
     
-    # Google Gemini Configuration
+    # Groq Configuration
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY environment variable is required")
+        
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    
+    # Google Configuration (for embeddings)
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     if not GOOGLE_API_KEY:
-        raise ValueError("GOOGLE_API_KEY environment variable is required")
-        
-    GOOGLE_API_BASE = os.getenv("GOOGLE_API_BASE", "https://generativelanguage.googleapis.com/v1beta")
-    GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-1.5-pro-latest")
-    GOOGLE_EMBEDDING_MODEL = os.getenv("GOOGLE_EMBEDDING_MODEL", "models/embedding-001")
+        raise ValueError("GOOGLE_API_KEY environment variable is required for embeddings")
+    
+    GOOGLE_EMBEDDING_MODEL = "models/embedding-001"
     
     # LLM Provider (for compatibility with existing code)
-    LLM_PROVIDER = "Google Gemini"
-    
-    # Set the API key in the environment
-    os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
+    LLM_PROVIDER = "Groq"
     
     # Vector store configuration
     VECTOR_STORE_DIR = "./enhanced_chroma_db"
@@ -340,58 +342,32 @@ class EnhancedRAGSystem:
             return []
     
     def _initialize_llm_and_embeddings(self):
-        """Initialize Gemini LLM and embeddings with proper configuration and error handling."""
-        logger.info("Initializing Google Gemini models...")
+        """Initialize Groq LLM and Google embeddings with proper configuration and error handling."""
+        logger.info("Initializing Groq model and Google embeddings...")
         
-        if not self.config.GOOGLE_API_KEY:
-            error_msg = "GOOGLE_API_KEY environment variable is not set"
+        if not self.config.GROQ_API_KEY:
+            error_msg = "GROQ_API_KEY environment variable is not set"
             logger.error(error_msg)
             raise ValueError(error_msg)
         
         try:
             # Import required modules
-            from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+            from langchain_groq import ChatGroq
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            from groq import Groq
             import google.generativeai as genai
-            from google.api_core import client_options as client_options_lib
-            
-            # Configure the Gemini client
-            genai.configure(api_key=self.config.GOOGLE_API_KEY)
-            
-            # Verify API key and model access
-            try:
-                available_models = genai.list_models()
-                model_names = [model.name for model in available_models]
-                logger.info(f"Available models: {model_names}")
-                
-                # Check if the requested model is available
-                if self.config.GOOGLE_MODEL not in model_names:
-                    logger.warning(f"Model {self.config.GOOGLE_MODEL} not found. Using default model.")
-                    # Fall back to a known working model
-                    model_name = "gemini-1.5-pro-latest"
-                else:
-                    model_name = self.config.GOOGLE_MODEL
-                    
-                logger.info(f"Using model: {model_name}")
-                logger.info(f"Using embedding model: {self.config.GOOGLE_EMBEDDING_MODEL}")
-                
-            except Exception as e:
-                logger.error(f"Error verifying model access: {str(e)}")
-                raise RuntimeError("Failed to verify access to Gemini API. Please check your API key and internet connection.")
             
             # Initialize embeddings with error handling and timeout
             logger.info("Initializing embeddings...")
             try:
-                # Use the latest stable embedding model
-                embedding_model = "models/embedding-001"
-                logger.info(f"Using embedding model: {embedding_model}")
-                
-                # Initialize the embeddings with the model
+                # Use Google's embeddings
                 self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model=embedding_model,
-                    google_api_key=self.config.GOOGLE_API_KEY,
+                    model="models/embedding-001",
+                    google_api_key=os.getenv("GOOGLE_API_KEY"),
                     request_timeout=30,  # seconds
                     max_retries=3
                 )
+                
                 # Test the embeddings
                 test_embedding = self.embeddings.embed_query("test")
                 logger.info(f"Successfully initialized embeddings. Vector dimension: {len(test_embedding)}")
@@ -399,19 +375,16 @@ class EnhancedRAGSystem:
             except Exception as e:
                 error_msg = f"Failed to initialize embeddings: {str(e)}"
                 logger.error(error_msg)
-                raise RuntimeError("Failed to initialize embeddings. Please check your API key and network connection.")
+                raise RuntimeError("Failed to initialize embeddings. Please check your Google API key and network connection.")
             
             # Initialize LLM with error handling
             logger.info("Initializing LLM...")
             try:
-                self.llm = ChatGoogleGenerativeAI(
-                    model=model_name,
+                self.llm = ChatGroq(
+                    groq_api_key=self.config.GROQ_API_KEY,
+                    model_name=self.config.GROQ_MODEL,
                     temperature=self.config.TEMPERATURE,
-                    max_output_tokens=self.config.MAX_TOKENS,
-                    google_api_key=self.config.GOOGLE_API_KEY,
-                    convert_system_message_to_human=True,
-                    max_retries=3,
-                    request_timeout=60,
+                    max_tokens=self.config.MAX_TOKENS,
                     streaming=False  # Disable streaming for simpler error handling
                 )
                 
@@ -422,16 +395,16 @@ class EnhancedRAGSystem:
             except Exception as e:
                 error_msg = f"Failed to initialize LLM: {str(e)}"
                 logger.error(error_msg)
-                raise RuntimeError("Failed to initialize the language model. Please check your API key and model name.")
+                raise RuntimeError("Failed to initialize the language model. Please check your Groq API key and model name.")
             
-            logger.info("Successfully initialized Google Gemini models")
+            logger.info("Successfully initialized Groq model and Google embeddings")
             
         except ImportError as e:
-            error_msg = f"Required packages not found: {str(e)}. Please install with: pip install google-generativeai langchain-google-genai"
+            error_msg = f"Required packages not found: {str(e)}. Please install with: pip install groq langchain-groq langchain-google-genai google-generativeai"
             logger.error(error_msg)
             raise ImportError(error_msg)
         except Exception as e:
-            error_msg = f"Failed to initialize Gemini models: {str(e)}"
+            error_msg = f"Failed to initialize models: {str(e)}"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
     
@@ -679,8 +652,8 @@ Answer:"""
 config = Config()
 
 # Validate configuration
-if not config.GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY environment variable is required")
+if not config.GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY environment variable is required")
 
 # Ensure the vector store directory exists
 os.makedirs(config.VECTOR_STORE_DIR, exist_ok=True)
@@ -689,8 +662,7 @@ os.makedirs(config.CACHE_DIR, exist_ok=True)
 # Initialize RAG system
 try:
     rag_system = EnhancedRAGSystem(config)
-    logger.info(f"Using Google Gemini model: {config.GOOGLE_MODEL}")
-    logger.info(f"Using Google Embedding model: {config.GOOGLE_EMBEDDING_MODEL}")
+    logger.info(f"Using Groq model: {config.GROQ_MODEL}")
     logger.info("Enhanced RAG system initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize RAG system: {e}")
@@ -737,7 +709,7 @@ app.layout = dbc.Container([
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
-                    html.H4("Google Gemini", className="text-success mb-0"),
+                    html.H4("Groq", className="text-success mb-0"),
                     html.P("LLM Provider", className="text-muted mb-0")
                 ])
             ], className="text-center")
