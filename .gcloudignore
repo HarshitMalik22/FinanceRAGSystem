@@ -1,0 +1,42 @@
+# Ignore Python files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.env
+.venv
+
+# Ignore ChromaDB data
+chroma_db/
+
+# Ignore development and IDE files
+.git/
+.gitignore
+.DS_Store
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.vscode/
+.idea/
+
+# Ignore local settings
+.env.local
+.env.*.local
+
+# Ignore deployment artifacts
+Dockerfile
+.dockerignore
+.gcloudignore
+cloudbuild*.yaml
+
+# Ignore large files
+*.pdf
+*.docx
+*.xlsx
+*.csv

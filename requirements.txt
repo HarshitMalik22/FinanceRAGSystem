@@ -1,0 +1,47 @@
+# Core Framework
+dash>=2.14.1
+dash-bootstrap-components>=1.5.0
+plotly>=5.17.0
+python-dotenv>=1.0.0
+
+# LangChain and AI
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-core>=0.3.65
+langchain-google-genai>=2.0.0
+google-generativeai>=0.8.5
+google-api-python-client>=2.0.0
+
+# Vector Database
+chromadb==0.4.18
+
+# Document Processing
+PyPDF2==3.0.1
+python-docx==0.8.11
+openpyxl==3.1.2
+unstructured==0.11.6
+python-magic==0.4.27
+pdfplumber==0.9.0
+pymupdf==1.23.14
+
+# Data Processing
+pandas==2.1.4
+numpy==1.24.3
+
+# Utilities
+tqdm==4.66.1
+python-multipart==0.0.6
+
+# Server
+gunicorn==21.2.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Text Processing
+nltk==3.8.1
+spacy==3.7.2
+
+# Web scraping (if needed)
+requests==2.31.0
+beautifulsoup4==4.12.2
