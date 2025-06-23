@@ -1,0 +1,5 @@
+This is a test document for the Finance RAG System.
+It contains sample financial information.
+
+The company reported revenue of $1.2 million in Q1 2023.
+Expenses were $850,000, resulting in a net profit of $350,000.

@@ -1,0 +1,31 @@
+{
+  "name": "finance-rag-system",
+  "version": "1.0.0",
+  "description": "A sophisticated financial document analysis system with RAG (Retrieval-Augmented Generation)",
+  "private": true,
+  "scripts": {
+    "start": "concurrently \"npm run start:frontend\" \"npm run start:backend\"",
+    "start:frontend": "cd frontend && npm start",
+    "start:backend": "python finance_rag_app.py",
+    "build": "cd frontend && npm run build",
+    "test": "cd frontend && npm test",
+    "eject": "cd frontend && npm run eject",
+    "install:all": "npm install && cd frontend && npm install",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\""
+  },
+  "keywords": [
+    "finance",
+    "rag",
+    "llm",
+    "document-analysis",
+    "react",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.0.1",
+    "prettier": "^2.8.8"
+  },
+  "dependencies": {}
+}
