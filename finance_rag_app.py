@@ -1062,6 +1062,18 @@ def upload_document():
             
         logger.info(f"File saved successfully. Size: {file_size} bytes")
         
+        # Clear existing vector store before adding new documents
+        logger.info("Clearing existing vector store")
+        try:
+            if rag_system.vector_store and hasattr(rag_system.vector_store, 'delete'):
+                # Get all document IDs and delete them
+                all_docs = rag_system.vector_store.get()
+                if all_docs and 'ids' in all_docs and all_docs['ids']:
+                    rag_system.vector_store.delete(ids=all_docs['ids'])
+                    logger.info(f"Deleted {len(all_docs['ids'])} existing documents from vector store")
+        except Exception as e:
+            logger.warning(f"Warning: Could not clear vector store: {str(e)}")
+        
         # Process the file
         logger.info(f"Processing file: {file.filename}")
         result = rag_system.add_documents_batch([file_path], [file.filename])
