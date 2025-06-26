@@ -40,7 +40,7 @@ from werkzeug.utils import secure_filename
 # LangChain imports
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
@@ -65,7 +65,7 @@ from dotenv import load_dotenv
 # LangChain imports
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
@@ -520,7 +520,7 @@ class EnhancedRAGSystem:
         """Initialize vector store with proper configuration and error handling."""
         try:
             # Ensure the vector store directory exists and is writable
-            os.makedirs(self.config.VECTOR_STORE_DIR, exist_ok=True, mode=0o755)
+            os.makedirs(self.config.VECTOR_STORE_DIR, exist_ok=True)
             
             # Test directory permissions
             test_file = os.path.join(self.config.VECTOR_STORE_DIR, '.permission_test')
@@ -535,41 +535,30 @@ class EnhancedRAGSystem:
             
             logger.info(f"Initializing Chroma vector store in {self.config.VECTOR_STORE_DIR}")
             logger.info(f"Collection name: {self.config.VECTOR_STORE_COLLECTION}")
+            
+            # Ensure vector store directory exists and is writable
+            os.makedirs(self.config.VECTOR_STORE_DIR, exist_ok=True, mode=0o755)
+            if not os.access(self.config.VECTOR_STORE_DIR, os.W_OK):
+                error_msg = f"Vector store directory is not writable: {self.config.VECTOR_STORE_DIR}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
                 
             logger.info(f"Initializing Chroma vector store in: {os.path.abspath(self.config.VECTOR_STORE_DIR)}")
             
             # Initialize Chroma with error handling
             try:
-                # For ChromaDB 1.0.0+ with the new client API
-                import chromadb
-                from chromadb.config import Settings as ChromaSettings
-                
-                # Initialize the Chroma client
-                client = chromadb.PersistentClient(
-                    path=self.config.VECTOR_STORE_DIR,
-                    settings=ChromaSettings(anonymized_telemetry=False)
-                )
-                
-                # Get or create the collection
-                try:
-                    collection = client.get_collection(name=self.config.VECTOR_STORE_COLLECTION)
-                    logger.info(f"Using existing collection: {self.config.VECTOR_STORE_COLLECTION}")
-                except Exception:
-                    # Collection doesn't exist, create it
-                    collection = client.create_collection(
-                        name=self.config.VECTOR_STORE_COLLECTION,
-                        metadata={"hnsw:space": "cosine"}  # Optimize for similarity search
-                    )
-                    logger.info(f"Created new collection: {self.config.VECTOR_STORE_COLLECTION}")
-                
-                # Initialize the LangChain Chroma wrapper
                 self.vector_store = Chroma(
-                    client=client,
                     collection_name=self.config.VECTOR_STORE_COLLECTION,
                     embedding_function=self.embeddings,
-                    collection_metadata={"hnsw:space": "cosine"}
+                    persist_directory=self.config.VECTOR_STORE_DIR,
+                    collection_metadata={"hnsw:space": "cosine"},  # Optimize for similarity search
+                    # Add configuration to prevent numerical stability issues
+                    client_settings={
+                        "chroma_db_impl": "duckdb+parquet",
+                        "anonymized_telemetry": False,
+                        "allow_reset": True
+                    }
                 )
-                
                 logger.info("Chroma vector store initialized successfully")
             except Exception as e:
                 error_msg = f"Failed to initialize Chroma: {str(e)}"
@@ -730,7 +719,12 @@ YOUR RESPONSE:"""
                 else:
                     logger.info(f"Successfully added {added_count} documents. New total: {final_count}")
                     
-                logger.debug("Vector store persistence is handled automatically by Chroma")
+                # Force persistence and verify
+                self.vector_store.persist()
+                if not os.path.exists(os.path.join(self.config.VECTOR_STORE_DIR, 'chroma.sqlite3')):
+                    logger.error("Failed to persist vector store: chroma.sqlite3 not found")
+                else:
+                    logger.info("Vector store persistence verified")
                     
             except Exception as e:
                 logger.error(f"Error adding documents to vector store: {str(e)}", exc_info=True)
@@ -808,11 +802,14 @@ YOUR RESPONSE:"""
                     logger.warning(f"No valid documents in batch {batch_num}")
                     continue
                 
-                # Add documents - persistence is automatic in Chroma 0.4.x+
+                # Add documents
                 try:
                     self.vector_store.add_documents(valid_docs)
                     added_count += len(valid_docs)
                     logger.info(f"Successfully added batch {batch_num}/{total_batches} with {len(valid_docs)} documents")
+                    
+                    # Persistence is automatic in Chroma 0.4.x+
+                    logger.debug(f"Added batch {batch_num}, persistence is automatic")
                     
                 except Exception as add_error:
                     logger.error(f"Failed to add batch {batch_num}: {str(add_error)}")
@@ -834,7 +831,13 @@ YOUR RESPONSE:"""
             f"({success_ratio:.1f}% success rate)"
         )
         
-        # Persistence is handled automatically by Chroma 0.4.x+
+        if added_count > 0:
+            try:
+                self.vector_store.persist()
+                logger.info("Final vector store persistence completed")
+            except Exception as e:
+                logger.error(f"Failed final persistence: {str(e)}")
+        
         return added_count
             
     def query(self, question, max_retries=3):

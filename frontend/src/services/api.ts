@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import config from '../config';
-import { Document, QueryResponse, DocumentListResponse } from '../types/api';
+import { Document, QueryResponse, DocumentListResponse, UploadResponse } from '../types/api';
 
 // Create an Axios instance with default config
 const apiClient: AxiosInstance = axios.create({
@@ -53,12 +53,13 @@ apiClient.interceptors.response.use(
 // API methods
 export const api = {
   // Document endpoints
-  uploadDocuments: (formData: FormData): Promise<Document> => {
-    return apiClient.post(config.api.endpoints.upload, formData, {
+  uploadDocuments: async (formData: FormData): Promise<UploadResponse> => {
+    const response = await apiClient.post<UploadResponse>(config.api.endpoints.upload, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     });
+    return response as unknown as UploadResponse;
   },
 
   // Query endpoint

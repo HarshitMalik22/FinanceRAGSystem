@@ -126,64 +126,107 @@ const Dashboard: React.FC = () => {
     showSnackbar('Document removed', 'info');
   };
 
+  // Define the server document type
+  interface ServerDocument {
+    document_id: string;
+    filename: string;
+    file_size: number;
+    chunks_processed: number;
+    upload_time: string;
+    processing_time_seconds: number;
+  }
+
+  // Define the upload response type
+  interface UploadResponse {
+    message: string;
+    document_id: string;
+    filename: string;
+    file_size: number;
+    chunks_processed: number;
+    upload_time: string;
+    processing_time_seconds: number;
+  }
+
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
-      showSnackbar('Please select at least one file to upload', 'error');
+      setSnackbar({
+        open: true,
+        message: 'Please select at least one file to upload',
+        severity: 'error'
+      });
       return;
     }
 
-    try {
-      // Update UI to show processing state
-      setDocuments(prev => 
-        prev.map(doc => ({
-          ...doc,
-          status: 'processing' as const
-        }))
-      );
+    // Create a new array of documents with processing status
+    const newDocuments = selectedFiles.map(file => ({
+      id: Math.random().toString(36).substring(2, 9),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      uploadDate: new Date().toISOString(),
+      status: 'processing' as const,
+      file
+    }));
 
-      // Process each file one by one
-      for (const file of selectedFiles) {
-        try {
-          const formData = new FormData();
-          formData.append('file', file);
-          
-          // Upload the file to the backend
-          const response = await api.uploadDocuments(formData);
-          
-          // Update the document status to uploaded
+    // Add new documents to the state
+    setDocuments(prev => [...prev, ...newDocuments]);
+    
+    // Process each file one by one
+    for (const doc of newDocuments) {
+      const formData = new FormData();
+      formData.append('file', doc.file);
+      
+      try {
+        const response = await api.uploadDocuments(formData);
+        
+        if (response && response.message === 'File processed successfully') {
+          // Update the document with server response
           setDocuments(prev => 
-            prev.map(doc => 
-              doc.name === file.name 
-                ? { ...doc, status: 'uploaded' as const }
-                : doc
+            prev.map(d => 
+              d.id === doc.id
+                ? { 
+                    ...d, 
+                    id: response.document_id,
+                    size: response.file_size,
+                    uploadDate: response.upload_time || new Date().toISOString(),
+                    type: response.filename.split('.').pop()?.toUpperCase() || 'UNKNOWN',
+                    status: 'uploaded' as const,
+                    file: undefined // Remove the file reference
+                  } 
+                : d
             )
           );
           
-          showSnackbar(`Successfully uploaded ${file.name}`, 'success');
-          
-        } catch (error) {
-          console.error(`Error uploading ${file.name}:`, error);
-          
-          // Update the document status to error
-          setDocuments(prev => 
-            prev.map(doc => 
-              doc.name === file.name 
-                ? { ...doc, status: 'error' as const }
-                : doc
-            )
-          );
-          
-          showSnackbar(`Failed to upload ${file.name}`, 'error');
+          setSnackbar({
+            open: true,
+            message: `${doc.name} uploaded successfully`,
+            severity: 'success'
+          });
+        } else {
+          throw new Error(response?.message || 'Unknown error occurred');
         }
+      } catch (error) {
+        console.error('Upload error:', error);
+        
+        // Update status to error for the failed document
+        setDocuments(prev => 
+          prev.map(d => 
+            d.id === doc.id 
+              ? { ...d, status: 'error' as const } 
+              : d
+          )
+        );
+        
+        setSnackbar({
+          open: true,
+          message: `Error uploading ${doc.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          severity: 'error'
+        });
       }
-      
-      // Clear selected files after processing
-      setSelectedFiles([]);
-      
-    } catch (error) {
-      console.error('Upload failed:', error);
-      showSnackbar('Failed to process documents', 'error');
     }
+    
+    // Clear selected files after processing
+    setSelectedFiles([]);
   };
 
   const formatFileSize = (bytes: number) => {
