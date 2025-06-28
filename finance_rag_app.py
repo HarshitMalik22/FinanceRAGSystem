@@ -1026,11 +1026,19 @@ def serve(path):
 
 # Configure CORS for all routes under /api/
 app.config['CORS_SUPPORTS_CREDENTIALS'] = True
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload size
+
+# Allow both local development and production URLs
+allowed_origins = [
+    "http://localhost:3000",
+    "https://financeragsystem.onrender.com"
+]
+
 CORS(
     app,
     resources={
         r"/api/*": {
-            "origins": "http://localhost:3000",
+            "origins": allowed_origins,
             "methods": ["GET", "POST", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
             "supports_credentials": True,
@@ -1145,8 +1153,10 @@ def upload_document():
         logger.error(error_msg)
         return jsonify({"error": error_msg}), 400
     
-    temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp')
+    # Create a temp directory in the system's temp location
+    temp_dir = os.path.join(tempfile.gettempdir(), 'finance_rag_uploads')
     os.makedirs(temp_dir, exist_ok=True)
+    os.chmod(temp_dir, 0o777)  # Ensure write permissions
     
     file_path = os.path.join(temp_dir, secure_filename(file.filename))
     
