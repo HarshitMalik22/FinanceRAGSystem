@@ -26,7 +26,8 @@ COPY requirements.txt .
 
 # Install dependencies with pip's new resolver
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --user -r requirements.txt
+    pip install --no-cache-dir --user -r requirements.txt && \
+    pip install --no-cache-dir --user langchain-chroma
 
 # Runtime stage
 FROM python:3.10-slim
@@ -52,9 +53,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy Python dependencies from builder
 COPY --from=builder /root/.local /root/.local
 
+# Install langchain-chroma in the final image
+RUN pip install --no-cache-dir --user langchain-chroma
+
 # Verify Python and pip are working
 RUN python --version && \
-    pip --version
+    pip --version && \
+    python -c "import langchain_community.vectorstores.chroma; print('Chroma import successful')"
 
 # Install NLTK data and spaCy model
 RUN python -m nltk.downloader popular && \
