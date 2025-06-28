@@ -1010,8 +1010,19 @@ except Exception as e:
     logger.error(f"Failed to initialize RAG system: {e}")
     raise
 
-# Initialize Flask server
-app = Flask(__name__)
+# Initialize Flask server with correct paths
+frontend_path = os.path.abspath('frontend_build')
+app = Flask(__name__, 
+            static_folder=os.path.join(frontend_path, 'static'), 
+            template_folder=frontend_path)
+
+# Serve React App
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(os.path.join(app.template_folder, path)):
+        return send_from_directory(app.template_folder, path)
+    return send_from_directory(app.template_folder, 'index.html')
 
 # Configure CORS for all routes under /api/
 app.config['CORS_SUPPORTS_CREDENTIALS'] = True

@@ -65,7 +65,26 @@ RUN python --version && \
 RUN python -m nltk.downloader popular && \
     python -m spacy download en_core_web_sm
 
-# Copy application code
+# Install Node.js and npm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build frontend
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ .
+RUN npm run build
+
+# Create frontend build directory
+RUN mkdir -p /app/frontend_build
+RUN cp -r /app/frontend/build/* /app/frontend_build/
+
+# Copy backend code
+WORKDIR /app
 COPY . .
 
 # Create necessary directories
