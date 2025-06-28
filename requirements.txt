@@ -7,10 +7,12 @@ Werkzeug
 # LangChain and AI
 langchain
 langchain-core
+langchain-community
 langchain-groq
 langchain-google-genai
 google-generativeai
 groq
+langchain-chroma
 
 # Vector Database
 chromadb
