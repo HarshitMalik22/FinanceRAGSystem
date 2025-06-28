@@ -65,10 +65,10 @@ RUN python --version && \
 RUN python -m nltk.downloader popular && \
     python -m spacy download en_core_web_sm
 
-# Install Node.js and npm
+# Install Node.js 20.x and npm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    && curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
