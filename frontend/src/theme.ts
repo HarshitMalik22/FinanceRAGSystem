@@ -4,32 +4,32 @@ import { red } from '@mui/material/colors';
 // Create a theme instance
 const theme = createTheme({
   palette: {
-    mode: 'light',
+    mode: 'dark',
     primary: {
-      main: '#1976d2',
-      light: '#42a5f5',
-      dark: '#1565c0',
-      contrastText: '#fff',
+      main: '#4F46E5',
+      light: '#818CF8',
+      dark: '#4338CA',
+      contrastText: '#FFFFFF',
     },
     secondary: {
-      main: '#9c27b0',
-      light: '#ba68c8',
-      dark: '#7b1fa2',
-      contrastText: '#fff',
+      main: '#8B5CF6',
+      light: '#A78BFA',
+      dark: '#7C3AED',
+      contrastText: '#FFFFFF',
     },
     error: {
       main: red.A400,
     },
     background: {
-      default: '#f5f7fa',
-      paper: '#ffffff',
+      default: '#0F172A',
+      paper: '#1E293B',
     },
     text: {
-      primary: 'rgba(0, 0, 0, 0.87)',
-      secondary: 'rgba(0, 0, 0, 0.6)',
-      disabled: 'rgba(0, 0, 0, 0.38)',
+      primary: '#E2E8F0',
+      secondary: '#94A3B8',
+      disabled: '#64748B',
     },
-    divider: 'rgba(0, 0, 0, 0.12)',
+    divider: 'rgba(255, 255, 255, 0.12)',
   },
   typography: {
     fontFamily: [

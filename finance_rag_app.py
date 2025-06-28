@@ -100,10 +100,10 @@ logger = logging.getLogger(__name__)
 
 # Enhanced Configuration
 class Config:
-    # Document processing
-    CHUNK_SIZE = 2000
-    CHUNK_OVERLAP = 200
-    MAX_BATCH_SIZE = 50
+    # Document processing - optimized for speed
+    CHUNK_SIZE = 1500  # Slightly smaller chunks for faster processing
+    CHUNK_OVERLAP = 100  # Reduced overlap for less redundant processing
+    MAX_BATCH_SIZE = 200  # Increased batch size for bulk operations
     
     # Groq Configuration
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -126,21 +126,32 @@ class Config:
     VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "./chroma_db")
     VECTOR_STORE_COLLECTION = os.getenv("VECTOR_STORE_COLLECTION", "financial_documents")
     
-    # Performance settings
-    MAX_WORKERS = 4
+    # Performance settings - optimized for speed
+    MAX_WORKERS = min(16, (os.cpu_count() or 4) * 2)  # Use 2x CPU cores, max 16
     TEMPERATURE = 0.1
     MAX_TOKENS = 1000
     TOP_K_RETRIEVAL = 6
     
-    # Cache settings
+    # Cache settings - enable aggressive caching
     ENABLE_CACHING = True
     CACHE_DIR = "./document_cache"
+    
+    # Performance tuning
+    EMBEDDING_BATCH_SIZE = 64  # Batch size for embedding operations
+    MAX_RETRIES = 3  # Number of retries for failed operations
+    RETRY_DELAY = 1.0  # Initial retry delay in seconds
 
 class DocumentProcessor:
     """Enhanced document processor for handling large volumes of documents."""
     
     def __init__(self, config: Config):
+        """Initialize the DocumentProcessor with configuration.
+        
+        Args:
+            config: Configuration object containing processing parameters
+        """
         self.config = config
+        self._cache = {}  # In-memory document cache
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=config.CHUNK_SIZE,
             chunk_overlap=config.CHUNK_OVERLAP,
@@ -148,8 +159,12 @@ class DocumentProcessor:
             separators=["\n\n", "\n", " ", ""],
         )
         
-        # Create cache directory
-        os.makedirs(config.CACHE_DIR, exist_ok=True)
+        # Create cache directory if caching is enabled
+        if self.config.ENABLE_CACHING:
+            os.makedirs(self.config.CACHE_DIR, exist_ok=True)
+            logger.info(f"Document caching enabled. Cache directory: {self.config.CACHE_DIR}")
+        else:
+            logger.info("Document caching is disabled")
     
     def _get_file_hash(self, file_path: str) -> str:
         """Generate hash for file caching."""
@@ -186,99 +201,111 @@ class DocumentProcessor:
             logger.warning(f"Failed to cache documents: {e}")
     
     def load_document(self, file_path: str, file_name: str = None) -> List[Document]:
-        """Load and process a single document with caching."""
-        file_name = file_name or os.path.basename(file_path)
-        logger.info(f"Starting to load document: {file_name} from {file_path}")
+        """
+        Load and process a single document with optimized performance.
         
+        Args:
+            file_path: Path to the document file
+            file_name: Optional custom file name
+            
+        Returns:
+            List of Document objects or None if loading fails
+        """
+        file_name = file_name or os.path.basename(file_path)
+        logger.info(f"Loading document: {file_name}")
+        
+        if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
+            return None
+            
+        # Check cache first
+        file_hash = self._get_file_hash(file_path)
+        if self.config.ENABLE_CACHING and file_hash in self._cache:
+            logger.debug(f"Loading from cache: {file_name}")
+            return self._cache[file_hash]
+            
         try:
-            file_hash = self._get_file_hash(file_path)
-            logger.debug(f"Generated file hash: {file_hash}")
+            # Get file size for optimization
+            file_size = os.path.getsize(file_path)
             
-            # Check cache first if enabled
+            # Map file extensions to loaders with optimized settings
+            loader_map = {
+                '.pdf': lambda p: PyPDFLoader(p),
+                '.docx': lambda p: Docx2txtLoader(p),
+                '.doc': lambda p: Docx2txtLoader(p),
+                '.xls': lambda p: UnstructuredExcelLoader(p, mode="elements"),
+                '.xlsx': lambda p: UnstructuredExcelLoader(p, mode="elements"),
+                '.csv': lambda p: CSVLoader(p, csv_args={
+                    'delimiter': ',',
+                    'quotechar': '"',
+                    'fieldnames': None
+                }),
+                '.txt': lambda p: TextLoader(p, encoding='utf-8', autodetect_encoding=True),
+                '.md': lambda p: TextLoader(p, encoding='utf-8')
+            }
+            
+            # Get file extension and validate
+            _, ext = os.path.splitext(file_path.lower())
+            if ext not in loader_map:
+                logger.warning(f"Unsupported file type: {file_path}")
+                return None
+                
+            # Load documents with progress tracking
+            start_time = time.time()
+            loader = loader_map[ext](file_path)
+            
+            # Process in chunks for large files
+            if file_size > 10 * 1024 * 1024:  # > 10MB
+                logger.info(f"Processing large file in chunks: {file_name} ({file_size/1024/1024:.1f}MB)")
+                docs = []
+                chunk_num = 0
+                while True:
+                    try:
+                        chunk_docs = loader.load()
+                        if not chunk_docs:
+                            break
+                        docs.extend(chunk_docs)
+                        chunk_num += 1
+                        if chunk_num % 5 == 0:
+                            logger.debug(f"Processed {chunk_num} chunks, {len(docs)} documents so far...")
+                    except Exception as e:
+                        logger.warning(f"Error processing chunk {chunk_num} of {file_name}: {str(e)}")
+                        break
+            else:
+                docs = loader.load()
+            
+            # Add metadata to all documents
+            processed_docs = []
+            for doc in docs:
+                try:
+                    doc.metadata.update({
+                        'source': file_name,
+                        'file_hash': file_hash,
+                        'processed_at': datetime.now().isoformat()
+                    })
+                    processed_docs.append(doc)
+                except Exception as meta_error:
+                    logger.warning(f"Error adding metadata to document: {str(meta_error)}")
+            
+            if not processed_docs:
+                logger.warning(f"No valid documents found in {file_name}")
+                return None
+            
+            # Cache the loaded documents if enabled
             if self.config.ENABLE_CACHING:
-                logger.debug("Checking for cached documents...")
-                cached_docs = self._get_cached_documents(file_hash)
-                if cached_docs:
-                    logger.info(f"Loaded {len(cached_docs)} cached documents for {file_name}")
-                    return cached_docs
+                self._cache[file_hash] = processed_docs
+                
+            load_time = time.time() - start_time
+            logger.info(
+                f"Loaded {len(processed_docs)} documents from {file_name} "
+                f"in {load_time:.2f}s ({len(processed_docs)/max(load_time, 0.1):.1f} docs/s)"
+            )
             
-            # Ensure file exists and is readable
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"File not found: {file_path}")
-                
-            if not os.access(file_path, os.R_OK):
-                raise PermissionError(f"No read permissions for file: {file_path}")
-            
-            logger.info(f"Loading document: {file_path}")
-            documents = []
-            
-            # Load document based on file type
-            try:
-                if file_path.lower().endswith('.pdf'):
-                    logger.debug("Processing as PDF file")
-                    documents = self._load_pdf_with_fallback(file_path, file_name)
-                elif file_path.lower().endswith('.docx'):
-                    logger.debug("Processing as DOCX file")
-                    loader = Docx2txtLoader(file_path)
-                    documents = loader.load()
-                elif file_path.lower().endswith('.txt'):
-                    logger.debug("Processing as TXT file")
-                    loader = TextLoader(file_path, encoding='utf-8')
-                    documents = loader.load()
-                elif file_path.lower().endswith('.csv'):
-                    logger.debug("Processing as CSV file")
-                    documents = self._load_csv_enhanced(file_path, file_name)
-                elif file_path.lower().endswith(('.xls', '.xlsx')):
-                    logger.debug("Processing as Excel file")
-                    documents = self._load_excel_enhanced(file_path, file_name)
-                else:
-                    error_msg = f"Unsupported file type: {file_path}"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                    
-                if not documents:
-                    warning_msg = f"No content could be extracted from {file_name}"
-                    logger.warning(warning_msg)
-                    return []
-                    
-                logger.info(f"Successfully loaded {len(documents)} document(s) from {file_name}")
-                
-                # Cache the loaded documents
-                if self.config.ENABLE_CACHING:
-                    logger.debug("Caching loaded documents")
-                    try:
-                        self._cache_documents(file_hash, documents)
-                    except Exception as cache_error:
-                        logger.warning(f"Failed to cache documents: {str(cache_error)}")
-                
-                # Add metadata to each document
-                processed_docs = []
-                for doc in documents:
-                    try:
-                        doc.metadata.update({
-                            'source': file_name,
-                            'file_hash': file_hash,
-                            'processed_at': datetime.now().isoformat()
-                        })
-                        processed_docs.append(doc)
-                    except Exception as meta_error:
-                        logger.warning(f"Error adding metadata to document: {str(meta_error)}")
-                        processed_docs.append(doc)  # Still add the document even if metadata fails
-                
-                if not processed_docs:
-                    logger.warning(f"No valid documents processed from {file_name}")
-                    return []
-                    
-                return processed_docs
-                
-            except Exception as e:
-                error_msg = f"Error processing document {file_name}: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                raise RuntimeError(f"Failed to process document: {error_msg}") from e
+            return processed_docs
             
         except Exception as e:
-            logger.error(f"Error loading {file_name}: {str(e)}")
-            raise
+            logger.error(f"Error loading document {file_name}: {str(e)}", exc_info=True)
+            return None
     
     def _load_pdf_with_fallback(self, file_path: str, file_name: str) -> List[Document]:
         """Load PDF with multiple fallback methods."""
@@ -764,7 +791,7 @@ YOUR RESPONSE:"""
     
     def _add_chunks_to_vector_store(self, chunks: List[Document]) -> int:
         """
-        Add document chunks to vector store in batches.
+        Optimized method to add document chunks to vector store in parallel batches.
         
         Args:
             chunks: List of document chunks to add
@@ -776,57 +803,42 @@ YOUR RESPONSE:"""
             logger.warning("No chunks provided to add to vector store")
             return 0
             
-        batch_size = self.config.MAX_BATCH_SIZE
+        batch_size = min(self.config.MAX_BATCH_SIZE, 100)  # Cap batch size to avoid memory issues
         total_batches = (len(chunks) + batch_size - 1) // batch_size
         
         logger.info(f"Adding {len(chunks)} chunks to vector store in {total_batches} batches...")
         
-        # Ensure vector store directory exists and is writable
-        os.makedirs(self.config.VECTOR_STORE_DIR, exist_ok=True, mode=0o755)
-        if not os.access(self.config.VECTOR_STORE_DIR, os.W_OK):
-            error_msg = f"Vector store directory is not writable: {self.config.VECTOR_STORE_DIR}"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        
         added_count = 0
         batch_errors = 0
         
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            batch_num = (i // batch_size) + 1
+        # Process batches in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=self.config.MAX_WORKERS) as executor:
+            futures = []
             
-            try:
-                # Verify documents in batch
-                valid_docs = []
-                for doc in batch:
-                    if not doc.page_content or not doc.page_content.strip():
-                        logger.warning(f"Empty document content in batch {batch_num}")
-                        continue
-                    valid_docs.append(doc)
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min((batch_num + 1) * batch_size, len(chunks))
+                batch = chunks[start_idx:end_idx]
                 
-                if not valid_docs:
-                    logger.warning(f"No valid documents in batch {batch_num}")
-                    continue
-                
-                # Add documents - persistence is automatic in Chroma 0.4.x+
+                # Submit batch processing task
+                future = executor.submit(
+                    self._process_single_batch,
+                    batch,
+                    batch_num + 1,
+                    total_batches
+                )
+                futures.append(future)
+            
+            # Process completed futures
+            for future in as_completed(futures):
                 try:
-                    self.vector_store.add_documents(valid_docs)
-                    added_count += len(valid_docs)
-                    logger.info(f"Successfully added batch {batch_num}/{total_batches} with {len(valid_docs)} documents")
-                    
-                except Exception as add_error:
-                    logger.error(f"Failed to add batch {batch_num}: {str(add_error)}")
+                    batch_added = future.result()
+                    added_count += batch_added
+                except Exception as e:
+                    logger.error(f"Error processing batch: {str(e)}")
                     batch_errors += 1
                     if batch_errors >= 3:  # If we fail 3 times in a row, give up
-                        raise
-                    continue
-                    
-            except Exception as e:
-                logger.error(f"Unexpected error processing batch {batch_num}: {str(e)}", exc_info=True)
-                batch_errors += 1
-                if batch_errors >= 3:  # If we fail 3 times in a row, give up
-                    raise
-                continue
+                        raise RuntimeError("Too many batch processing errors") from e
         
         success_ratio = (added_count / len(chunks)) * 100 if chunks else 0
         logger.info(
@@ -836,6 +848,52 @@ YOUR RESPONSE:"""
         
         # Persistence is handled automatically by Chroma 0.4.x+
         return added_count
+        
+    def _process_single_batch(self, batch: List[Document], batch_num: int, total_batches: int) -> int:
+        """
+        Process a single batch of documents with retries.
+        
+        Args:
+            batch: List of documents in the batch
+            batch_num: Current batch number
+            total_batches: Total number of batches
+            
+        Returns:
+            int: Number of successfully processed documents in this batch
+        """
+        retry_count = 0
+        max_retries = self.config.MAX_RETRIES
+        
+        while retry_count <= max_retries:
+            try:
+                # Filter out any invalid documents
+                valid_docs = [doc for doc in batch if doc.page_content and doc.page_content.strip()]
+                if not valid_docs:
+                    logger.warning(f"No valid documents in batch {batch_num}")
+                    return 0
+                    
+                # Add documents to the vector store
+                self.vector_store.add_documents(valid_docs)
+                logger.info(f"Successfully added batch {batch_num}/{total_batches} with {len(valid_docs)} documents")
+                return len(valid_docs)
+                
+            except Exception as e:
+                retry_count += 1
+                if retry_count > max_retries:
+                    logger.error(
+                        f"Failed to add batch {batch_num} after {max_retries} attempts: {str(e)}",
+                        exc_info=True
+                    )
+                    return 0
+                    
+                wait_time = self.config.RETRY_DELAY * (2 ** (retry_count - 1))  # Exponential backoff
+                logger.warning(
+                    f"Error adding batch {batch_num} (attempt {retry_count}/{max_retries}): {str(e)}"
+                    f" - Retrying in {wait_time:.1f} seconds..."
+                )
+                time.sleep(wait_time)
+        
+        return 0
             
     def query(self, question, max_retries=3):
         if not question or not question.strip():

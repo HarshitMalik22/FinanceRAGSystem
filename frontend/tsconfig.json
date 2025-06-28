@@ -15,11 +15,13 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    "jsxImportSource": "@emotion/react",
     "baseUrl": "./src",
     "paths": {
       "*": ["src/*"]
     },
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "types": ["node", "jest", "@emotion/react", "@emotion/styled"]
   },
   "include": ["src"],
   "exclude": ["node_modules"]
