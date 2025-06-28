@@ -115,9 +115,7 @@ Thumbs.db
 
 # ===== Docker =====
 .dockerignore
-Dockerfile
 .dockerfile
-Dockerfile.*
 docker-compose.override.yml
 
 # ===== Debug files =====
