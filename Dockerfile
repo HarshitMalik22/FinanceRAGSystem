@@ -14,13 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
     python3-dev \
+    libmagic1 \
+    poppler-utils \
+    tesseract-ocr \
+    libtesseract-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 
-# Install dependencies
-RUN pip install --user -r requirements.txt
+# Install dependencies with pip's new resolver and no-deps
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --user -r requirements.txt
 
 # Runtime stage
 FROM python:3.10-slim
@@ -46,6 +51,12 @@ COPY . .
 
 # Create necessary directories
 RUN mkdir -p /app/chroma_db
+
+# Install NLTK data
+RUN python -m nltk.downloader popular
+
+# Install spaCy model
+RUN python -m spacy download en_core_web_sm
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

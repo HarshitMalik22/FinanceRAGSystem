@@ -1,52 +1,52 @@
 # Core Framework
-flask==2.3.3
-flask-cors==4.0.0
-python-dotenv==1.0.0
-Werkzeug==2.3.7
+flask
+flask-cors
+python-dotenv
+Werkzeug
 
 # LangChain and AI
-langchain==0.0.335
-langchain-core==0.1.7
-langchain-groq==0.3.2
-langchain-google-genai==0.0.7
-google-generativeai==0.3.2
-groq==0.4.1
+langchain
+langchain-core
+langchain-groq
+langchain-google-genai
+google-generativeai
+groq
 
 # Vector Database
-chromadb==0.4.22
+chromadb
 
 # Document Processing
-PyPDF2==3.0.1
-python-docx==0.8.11
-openpyxl==3.1.2
-unstructured==0.10.30
-python-magic==0.4.27
-pdfplumber==0.10.2
-pymupdf==1.23.8
+PyPDF2
+python-docx
+openpyxl
+unstructured
+python-magic
+pdfplumber
+pymupdf
 
 # Data Processing
-pandas==2.1.1
-numpy==1.26.0
+pandas
+numpy
 
 # Utilities
-tqdm==4.66.1
-python-multipart==0.0.6
+tqdm
+python-multipart
 
 # Server
-gunicorn==21.2.0
+gunicorn
 
 # Database
-psycopg2-binary==2.9.9
+psycopg2-binary
 
 # Text Processing
-nltk==3.8.1
-spacy==3.7.2
+nltk
+spacy
 
 # Dash components
-dash==2.14.1
-dash-bootstrap-components==1.5.0
-dash-core-components==2.0.0
-dash-html-components==2.0.0
-plotly==5.18.0
-requests==2.31.0
-beautifulsoup4==4.12.2
+dash
+dash-bootstrap-components
+dash-core-components
+dash-html-components
+plotly
+requests
+beautifulsoup4
