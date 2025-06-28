@@ -1,1 +1,1 @@
-web: gunicorn finance_rag_app:app --timeout 120
+web: gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 120 finance_rag_app:app

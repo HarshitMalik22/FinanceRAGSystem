@@ -1,4 +1,5 @@
-FROM python:3.10-slim
+# Build stage
+FROM python:3.10-slim as builder
 
 WORKDIR /app
 
@@ -6,36 +7,51 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
     python3-dev \
-    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install dependencies
+RUN pip install --user -r requirements.txt
+
+# Runtime stage
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     poppler-utils \
     tesseract-ocr \
     libtesseract-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies first to leverage Docker cache
-COPY requirements.txt .
+# Copy Python dependencies from builder
+COPY --from=builder /root/.local /root/.local
 
-# Install pip and core dependencies
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+# Ensure scripts in .local are usable
+ENV PATH="/root/.local/bin:$PATH"
 
-# Copy only necessary files
-COPY finance_rag_app.py .
-COPY config.py .
-COPY document_processor.py .
-COPY rag_system.py .
+# Copy application code
+COPY . .
 
 # Create necessary directories
 RUN mkdir -p /app/chroma_db
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    FLASK_ENV=production \
+    VECTOR_STORE_DIR="/app/chroma_db"
 
 # Expose the port the app runs on
 EXPOSE 10000

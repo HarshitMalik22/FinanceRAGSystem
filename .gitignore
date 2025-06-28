@@ -6,6 +6,13 @@ __pycache__/
 *.so
 .Python
 
+# Docker
+!.dockerignore
+
+# Ignore .dockerignore in all directories except root
+**/.dockerignore
+!.dockerignore
+
 # Distribution / packaging
 build/
 develop-eggs/
