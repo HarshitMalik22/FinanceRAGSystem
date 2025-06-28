@@ -101,9 +101,9 @@ logger = logging.getLogger(__name__)
 # Enhanced Configuration
 class Config:
     # Document processing - optimized for speed
-    CHUNK_SIZE = 1500  # Slightly smaller chunks for faster processing
-    CHUNK_OVERLAP = 100  # Reduced overlap for less redundant processing
-    MAX_BATCH_SIZE = 200  # Increased batch size for bulk operations
+    CHUNK_SIZE = 2000  # Increased chunk size to reduce total chunks
+    CHUNK_OVERLAP = 50  # Reduced overlap for faster processing
+    MAX_BATCH_SIZE = 100  # Smaller batch size for more responsive processing
     
     # Groq Configuration
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -308,31 +308,28 @@ class DocumentProcessor:
             return None
     
     def _load_pdf_with_fallback(self, file_path: str, file_name: str) -> List[Document]:
-        """Load PDF with multiple fallback methods."""
+        """Load PDF with optimized settings and fast fallback methods."""
         try:
-            # Try LangChain PyPDFLoader first
-            loader = PyPDFLoader(file_path)
-            return loader.load()
-        except Exception as e:
-            logger.warning(f"PyPDFLoader failed for {file_name}: {e}")
+            # First try PyMuPDF which is generally faster than PyPDF
+            loader = UnstructuredFileLoader(
+                file_path,
+                mode="elements",  # Process in elements mode for better performance
+                strategy="fast"     # Use fast strategy
+            )
+            docs = loader.load()
             
+            # Filter out small text elements that are likely not useful
+            return [doc for doc in docs if len(doc.page_content.strip()) > 50]
+            
+        except Exception as e:
+            logger.warning(f"Fast PDF loading failed: {str(e)}. Trying fallback...")
             try:
-                # Fallback to PyPDF2
-                documents = []
-                with open(file_path, 'rb') as file:
-                    pdf_reader = PyPDF2.PdfReader(file)
-                    for page_num, page in enumerate(pdf_reader.pages):
-                        text = page.extract_text()
-                        if text.strip():
-                            doc = Document(
-                                page_content=text,
-                                metadata={'source': file_name, 'page': page_num + 1}
-                            )
-                            documents.append(doc)
-                return documents
-            except Exception as e2:
-                logger.error(f"All PDF loading methods failed for {file_name}: {e2}")
-                raise
+                # Fallback to PyPDF with optimized settings
+                loader = PyPDFLoader(file_path)
+                return loader.load()
+            except Exception as e:
+                logger.error(f"PDF loading failed: {str(e)}")
+                return []
     
     def _load_csv_enhanced(self, file_path: str, file_name: str) -> List[Document]:
         """Enhanced CSV loading with better handling."""
@@ -422,17 +419,24 @@ class EnhancedRAGSystem:
         self.config = config
         self.document_processor = DocumentProcessor(config)
         
-        # Initialize LLM and embeddings based on provider
+        # Initialize LLM and embeddings first with optimized settings
         self._initialize_llm_and_embeddings()
         
-        # Initialize vector store
+        # Initialize vector store with optimized settings
         self._initialize_vector_store()
         
-        # Initialize QA chain
+        # Initialize QA chain with optimized settings
         self._initialize_qa_chain()
         
-        # Thread pool for parallel processing
-        self.executor = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
+        # Optimized thread pool for parallel processing
+        self.executor = ThreadPoolExecutor(
+            max_workers=min(4, (os.cpu_count() or 2) * 2),  # Limit max workers
+            thread_name_prefix='rag_worker'
+        )
+        
+        # Cache for embeddings to avoid reprocessing
+        self.embedding_cache = {}
+        self.cache_lock = threading.Lock()
     
     def _list_available_models(self):
         """List all available models from the API."""
@@ -694,126 +698,89 @@ YOUR RESPONSE:"""
             chain_type="stuff",
             retriever=retriever,
             return_source_documents=True,
-            chain_type_kwargs={"prompt": prompt}
-        )
+        }
+    )
+
+    self.qa_chain = RetrievalQA.from_chain_type(
+        llm=self.llm,
+        chain_type="stuff",
+        retriever=retriever,
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": prompt}
+    )
+
+    logger.info("QA chain initialized successfully")
+
+def _get_cached_embeddings(self, text: str) -> Optional[List[float]]:
+    """Get cached embeddings if available."""
+    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+    with self.cache_lock:
+        return self.embedding_cache.get(text_hash)
+
+def _cache_embeddings(self, text: str, embedding: List[float]) -> None:
+    """Cache embeddings for future use."""
+    if not text.strip():
+        return
+    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+    with self.cache_lock:
+        self.embedding_cache[text_hash] = embedding
+
+def _process_batch_with_cache(self, batch: List[Document]) -> List[Document]:
+    """Process a batch of documents with embedding caching."""
+    # Check cache first
+    texts_to_embed = []
+    cached_embeddings = {}
+
+    for doc in batch:
+        text = doc.page_content
+        cached = self._get_cached_embeddings(text)
+        if cached is not None:
+            cached_embeddings[text] = cached
+        else:
+            texts_to_embed.append(text)
+
+    # Get embeddings for non-cached texts
+    if texts_to_embed:
+        try:
+            new_embeddings = self.embeddings.embed_documents(texts_to_embed)
+            for text, embedding in zip(texts_to_embed, new_embeddings):
+                self._cache_embeddings(text, embedding)
+                cached_embeddings[text] = embedding
+        except Exception as e:
+            logger.error(f"Error getting embeddings: {str(e)}")
+            return []
+
+    # Update documents with embeddings
+    for doc in batch:
+
+def add_documents_batch(self, file_paths: List[str], file_names: List[str] = None) -> Dict[str, Any]:
+    """Process documents with optimized performance and error handling."""
+    if not file_names:
+        file_names = [os.path.basename(p) for p in file_paths]
         
-        logger.info("QA chain initialized successfully")
+    if len(file_paths) != len(file_names):
+        raise ValueError("file_paths and file_names must have the same length")
     
-    def add_documents_batch(self, file_paths: List[str], file_names: List[str] = None) -> Dict[str, Any]:
-        """Add multiple documents in batches with progress tracking."""
-        if not file_names:
-            file_names = [os.path.basename(path) for path in file_paths]
-        
-        results = {
-            'processed': 0,
-            'failed': 0,
-            'total_chunks': 0,
-            'errors': []
+    results = {
+        'processed': 0,
+        'failed': 0,
+        'total_chunks': 0,
+        'errors': []
+    }
+    
+    logger.info(f"Processing {len(file_paths)} documents...")
+    
+    # Process documents in parallel with a fixed number of workers
+    with ThreadPoolExecutor(max_workers=min(4, len(file_paths))) as executor:
+        # Process each document
+        future_to_name = {
+            executor.submit(self._process_single_document, path, name): name
+            for path, name in zip(file_paths, file_names)
         }
         
-        logger.info(f"Processing {len(file_paths)} documents...")
-        
-        # Process documents in parallel
-        future_to_file = {}
-        for file_path, file_name in zip(file_paths, file_names):
-            future = self.executor.submit(self._process_single_document, file_path, file_name)
-            future_to_file[future] = (file_path, file_name)
-        
-        all_chunks = []
-        for future in as_completed(future_to_file):
-            file_path, file_name = future_to_file[future]
-            try:
-                chunks = future.result()
-                if chunks:
-                    all_chunks.extend(chunks)
-                    results['processed'] += 1
-                    results['total_chunks'] += len(chunks)
-                    logger.info(f"Processed {file_name}: {len(chunks)} chunks")
-                else:
-                    results['failed'] += 1
-                    results['errors'].append(f"No content extracted from {file_name}")
-            except Exception as e:
-                results['failed'] += 1
-                error_msg = f"Error processing {file_name}: {str(e)}"
-                results['errors'].append(error_msg)
-                logger.error(error_msg)
-        
-        # Add chunks to vector store in batches and verify persistence
-        if all_chunks:
-            try:
-                # Store the initial document count
-                initial_count = self.vector_store._collection.count()
-                logger.info(f"Initial document count in vector store: {initial_count}")
-                
-                # Add documents to the vector store
-                added_count = self._add_chunks_to_vector_store(all_chunks)
-                
-                # Verify documents were added
-                final_count = self.vector_store._collection.count()
-                expected_count = initial_count + added_count
-                
-                if final_count < expected_count:
-                    logger.warning(f"Document count mismatch. Expected {expected_count}, got {final_count}")
-                else:
-                    logger.info(f"Successfully added {added_count} documents. New total: {final_count}")
-                    
-                logger.debug("Vector store persistence is handled automatically by Chroma")
-                    
-            except Exception as e:
-                logger.error(f"Error adding documents to vector store: {str(e)}", exc_info=True)
-                raise
-        
-        logger.info(f"Batch processing complete: {results['processed']} successful, {results['failed']} failed")
-        return results
-    
-    def _process_single_document(self, file_path: str, file_name: str) -> List[Document]:
-        """Process a single document and return chunks."""
-        try:
-            logger.info(f"Loading document: {file_name}")
-            documents = self.document_processor.load_document(file_path, file_name)
-            if not documents:
-                logger.error(f"No content extracted from {file_name}")
-                return []
-                
-            logger.info(f"Splitting document: {file_name} into chunks")
-            chunks = self.document_processor.split_documents(documents)
-            
-            if not chunks:
-                logger.error(f"No chunks generated from {file_name}")
-                return []
-                
-            logger.info(f"Generated {len(chunks)} chunks from {file_name}")
-            return chunks
-            
-        except Exception as e:
-            logger.error(f"Error processing {file_name}: {str(e)}", exc_info=True)
-            raise
-    
-    def _add_chunks_to_vector_store(self, chunks: List[Document]) -> int:
-        """
-        Optimized method to add document chunks to vector store in parallel batches.
-        
-        Args:
-            chunks: List of document chunks to add
-            
-        Returns:
-            int: Number of successfully added documents
-        """
-        if not chunks:
-            logger.warning("No chunks provided to add to vector store")
-            return 0
-            
-        batch_size = min(self.config.MAX_BATCH_SIZE, 100)  # Cap batch size to avoid memory issues
-        total_batches = (len(chunks) + batch_size - 1) // batch_size
-        
-        logger.info(f"Adding {len(chunks)} chunks to vector store in {total_batches} batches...")
-        
-        added_count = 0
-        batch_errors = 0
-        
-        # Process batches in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=self.config.MAX_WORKERS) as executor:
-            futures = []
+        # Process results as they complete
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
             
             for batch_num in range(total_batches):
                 start_idx = batch_num * batch_size
@@ -1016,17 +983,15 @@ app = Flask(__name__,
             static_folder=os.path.join(frontend_path, 'static'), 
             template_folder=frontend_path)
 
-# Serve React App
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve(path):
-    if path != "" and os.path.exists(os.path.join(app.template_folder, path)):
-        return send_from_directory(app.template_folder, path)
-    return send_from_directory(app.template_folder, 'index.html')
-
-# Configure CORS for all routes under /api/
 app.config['CORS_SUPPORTS_CREDENTIALS'] = True
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload size
+app.config['TIMEOUT'] = 300  # 5 minutes timeout for requests
+
+# Increase the timeout for gunicorn workers
+timeout = 300  # 5 minutes
+worker_class = 'gthread'
+workers = 2
+threads = 4
 
 # Allow both local development and production URLs
 allowed_origins = [
