@@ -7,7 +7,8 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/root/.local/bin:${PATH}"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -23,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 
-# Install dependencies with pip's new resolver and no-deps
+# Install dependencies with pip's new resolver
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir --user -r requirements.txt
 
@@ -31,6 +32,14 @@ RUN pip install --upgrade pip && \
 FROM python:3.10-slim
 
 WORKDIR /app
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/root/.local/bin:${PATH}" \
+    PYTHONPATH="/app:${PYTHONPATH}" \
+    FLASK_ENV=production \
+    VECTOR_STORE_DIR="/app/chroma_db"
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,8 +52,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy Python dependencies from builder
 COPY --from=builder /root/.local /root/.local
 
-# Ensure scripts in .local are usable
-ENV PATH="/root/.local/bin:$PATH"
+# Verify Python and pip are working
+RUN python --version && \
+    pip --version
+
+# Install NLTK data and spaCy model
+RUN python -m nltk.downloader popular && \
+    python -m spacy download en_core_web_sm
 
 # Copy application code
 COPY . .
@@ -52,17 +66,15 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p /app/chroma_db
 
-# Install NLTK data
-RUN python -m nltk.downloader popular
+# Set the working directory
+WORKDIR /app
 
-# Install spaCy model
-RUN python -m spacy download en_core_web_sm
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    FLASK_ENV=production \
-    VECTOR_STORE_DIR="/app/chroma_db"
+# Verify the installation
+RUN echo "PATH: $PATH" && \
+    echo "Python path: $(which python)" && \
+    echo "Pip path: $(which pip)" && \
+    echo "Installed packages:" && \
+    pip list
 
 # Expose the port the app runs on
 EXPOSE 10000
