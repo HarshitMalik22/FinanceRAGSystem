@@ -1,52 +1,52 @@
 # Core Framework
-flask==3.0.2
-flask-cors==4.0.0
-dash==2.14.2
-dash-bootstrap-components==1.5.0
-dash-core-components==2.0.0
-dash-html-components==2.0.0
-plotly==5.18.0
-python-dotenv==1.0.1
-Werkzeug==3.0.1
+flask>=2.0.0,<3.0.0
+flask-cors>=3.0.10,<4.0.0
+python-dotenv>=0.19.0,<2.0.0
+Werkzeug>=2.0.0,<3.0.0
 
 # LangChain and AI
-langchain==0.1.8
-langchain-core==0.1.27
-langchain-groq>=0.3.2
-langchain-google-genai==0.0.8
-google-generativeai==0.3.2
-groq==0.4.2
+langchain>=0.1.0,<0.2.0
+langchain-core>=0.1.0,<0.2.0
+langchain-groq>=0.3.2,<0.4.0
+langchain-google-genai>=0.0.7,<0.1.0
+google-generativeai>=0.3.0,<0.4.0
+groq>=0.4.0,<0.5.0
 
 # Vector Database
-chromadb==0.4.22
+chromadb>=0.4.0,<0.5.0
 
 # Document Processing
-PyPDF2==3.0.1
-python-docx==1.1.0
-openpyxl==3.1.2
-unstructured>=0.11.8
-python-magic==0.4.27
-pdfplumber==0.9.0
-pymupdf==1.23.14
+PyPDF2>=3.0.0,<4.0.0
+python-docx>=0.8.11,<0.9.0
+openpyxl>=3.0.0,<4.0.0
+unstructured>=0.11.8,<1.0.0
+python-magic>=0.4.27,<0.5.0
+pdfplumber>=0.9.0,<0.10.0
+pymupdf>=1.23.0,<2.0.0
 
 # Data Processing
-pandas==2.2.1
-numpy==1.24.3
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<2.0.0
 
 # Utilities
-tqdm==4.66.2
-python-multipart==0.0.6
+tqdm>=4.65.0,<5.0.0
+python-multipart>=0.0.6,<0.1.0
 
 # Server
-gunicorn==21.2.0
+gunicorn>=20.1.0,<21.0.0
 
 # Database
-psycopg2-binary==2.9.9
+psycopg2-binary>=2.9.0,<3.0.0
 
 # Text Processing
-nltk==3.8.1
-spacy==3.7.2
+nltk>=3.8.0,<4.0.0
+spacy>=3.6.0,<4.0.0
 
-# Web scraping (if needed)
+# Dash components
+dash>=2.11.0,<3.0.0
+dash-bootstrap-components>=1.5.0,<2.0.0
+dash-core-components>=2.0.0,<3.0.0
+dash-html-components>=2.0.0,<3.0.0
+plotly>=5.15.0,<6.0.0
 requests==2.31.0
 beautifulsoup4==4.12.2
