@@ -21,7 +21,6 @@ load_dotenv(env_path, override=True)
 print(f"GROQ_API_KEY loaded: {'Yes' if os.getenv('GROQ_API_KEY') else 'No'}")
 print(f"GOOGLE_API_KEY loaded: {'Yes' if os.getenv('GOOGLE_API_KEY') else 'No'}")
 
-import os
 import uuid
 import json
 import time
@@ -33,7 +32,6 @@ import pickle
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
 
 # Flask imports
 from flask import Flask, request, jsonify, send_from_directory
@@ -63,45 +61,51 @@ from langchain_community.document_loaders import (
 # Additional imports
 import PyPDF2
 import pandas as pd
-from dotenv import load_dotenv
-
-# LangChain imports
-from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
-from langchain.schema.runnable import RunnableLambda
-
-# File processing with better error handling
-from langchain_community.document_loaders import (
-    PyPDFLoader,
-    Docx2txtLoader,
-    TextLoader,
-    CSVLoader,
-    UnstructuredExcelLoader,
-    WebBaseLoader,
-)
-
-# Additional imports for better document handling
-import PyPDF2
-import pandas as pd
-from pathlib import Path
-import hashlib
-import pickle
+from langchain_core.runnables import RunnableLambda
 from tqdm import tqdm
-
-# Remove duplicate dotenv loading - already loaded at the top of the file
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import configuration
-from config import Config
+# Configuration class
+class Config:
+    """Configuration class for the RAG system."""
+    
+    def __init__(self):
+        # API Keys
+        self.GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+        self.GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+        
+        # LLM Configuration
+        self.LLM_PROVIDER = "groq"
+        self.GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama3-8b-8192')
+        self.GOOGLE_EMBEDDING_MODEL = os.getenv('GOOGLE_EMBEDDING_MODEL', 'models/embedding-001')
+        self.GOOGLE_API_BASE = os.getenv('GOOGLE_API_BASE', 'https://generativelanguage.googleapis.com')
+        
+        # Document Processing
+        self.CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', '1000'))
+        self.CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', '200'))
+        self.TOP_K_RETRIEVAL = int(os.getenv('TOP_K_RETRIEVAL', '5'))
+        
+        # Vector Store
+        self.VECTOR_STORE_DIR = os.getenv('VECTOR_STORE_DIR', './vector_store')
+        self.VECTOR_STORE_COLLECTION = os.getenv('VECTOR_STORE_COLLECTION', 'finance_docs')
+        
+        # Caching
+        self.ENABLE_CACHING = os.getenv('ENABLE_CACHING', 'true').lower() == 'true'
+        self.CACHE_DIR = os.getenv('CACHE_DIR', './cache')
+        
+        # Rate Limiting
+        self.RATE_LIMIT_DELAY = float(os.getenv('RATE_LIMIT_DELAY', '1.0'))
+        self.RATE_LIMIT_BACKOFF_FACTOR = float(os.getenv('RATE_LIMIT_BACKOFF_FACTOR', '2.0'))
+        self.MAX_RATE_LIMIT_DELAY = float(os.getenv('MAX_RATE_LIMIT_DELAY', '60.0'))
+        self.MAX_RETRIES = int(os.getenv('MAX_RETRIES', '3'))
+        self.RETRY_DELAY = float(os.getenv('RETRY_DELAY', '1.0'))
+        self.REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '30'))
+        
+        # Processing
+        self.EMBEDDING_BATCH_SIZE = int(os.getenv('EMBEDDING_BATCH_SIZE', '10'))
 
 # DocumentProcessor class
 class DocumentProcessor:
@@ -270,95 +274,6 @@ class DocumentProcessor:
             logger.error(f"Error loading document {file_name}: {str(e)}", exc_info=True)
             return None
     
-    def _load_pdf_with_fallback(self, file_path: str, file_name: str) -> List[Document]:
-        """Load PDF with optimized settings and fast fallback methods."""
-        try:
-            # First try PyMuPDF which is generally faster than PyPDF
-            loader = UnstructuredFileLoader(
-                file_path,
-                mode="elements",  # Process in elements mode for better performance
-                strategy="fast"     # Use fast strategy
-            )
-            docs = loader.load()
-            
-            # Filter out small text elements that are likely not useful
-            return [doc for doc in docs if len(doc.page_content.strip()) > 50]
-            
-        except Exception as e:
-            logger.warning(f"Fast PDF loading failed: {str(e)}. Trying fallback...")
-            try:
-                # Fallback to PyPDF with optimized settings
-                loader = PyPDFLoader(file_path)
-                return loader.load()
-            except Exception as e:
-                logger.error(f"PDF loading failed: {str(e)}")
-                return []
-    
-    def _load_csv_enhanced(self, file_path: str, file_name: str) -> List[Document]:
-        """Enhanced CSV loading with better handling."""
-        try:
-            df = pd.read_csv(file_path)
-            documents = []
-            
-            # Create a summary document
-            summary = f"CSV File: {file_name}\n"
-            summary += f"Columns: {', '.join(df.columns)}\n"
-            summary += f"Rows: {len(df)}\n"
-            summary += f"Data types:\n{df.dtypes.to_string()}\n"
-            
-            if len(df) > 0:
-                summary += f"\nFirst few rows:\n{df.head().to_string()}\n"
-                summary += f"\nSummary statistics:\n{df.describe().to_string()}"
-            
-            documents.append(Document(
-                page_content=summary,
-                metadata={'source': file_name, 'type': 'csv_summary'}
-            ))
-            
-            # For smaller datasets, include row-by-row data
-            if len(df) <= 1000:
-                for idx, row in df.iterrows():
-                    row_text = f"Row {idx + 1}:\n" + "\n".join([f"{col}: {val}" for col, val in row.items()])
-                    documents.append(Document(
-                        page_content=row_text,
-                        metadata={'source': file_name, 'row': idx + 1, 'type': 'csv_row'}
-                    ))
-            
-            return documents
-            
-        except Exception as e:
-            logger.error(f"Error loading CSV {file_name}: {e}")
-            raise
-    
-    def _load_excel_enhanced(self, file_path: str, file_name: str) -> List[Document]:
-        """Enhanced Excel loading."""
-        try:
-            # Load all sheets
-            excel_file = pd.ExcelFile(file_path)
-            documents = []
-            
-            for sheet_name in excel_file.sheet_names:
-                df = pd.read_excel(file_path, sheet_name=sheet_name)
-                
-                summary = f"Excel File: {file_name}, Sheet: {sheet_name}\n"
-                summary += f"Columns: {', '.join(df.columns)}\n"
-                summary += f"Rows: {len(df)}\n"
-                
-                if len(df) > 0:
-                    summary += f"\nFirst few rows:\n{df.head().to_string()}\n"
-                    summary += f"\nSummary statistics:\n{df.describe().to_string()}"
-                
-                documents.append(Document(
-                    page_content=summary,
-                    metadata={'source': file_name, 'sheet': sheet_name, 'type': 'excel_summary'}
-                ))
-            
-            return documents
-            
-        except Exception as e:
-            logger.error(f"Error loading Excel {file_name}: {e}")
-            raise
-    
     def split_documents(self, documents: List[Document]) -> List[Document]:
         """Split documents into chunks with progress tracking."""
         logger.info(f"Splitting {len(documents)} documents into chunks...")
@@ -401,89 +316,35 @@ class EnhancedRAGSystem:
         self.embedding_cache = {}
         self.cache_lock = threading.Lock()
     
-    def _list_available_models(self):
-        """List all available models from the API."""
-        import google.generativeai as genai
-        from google.api_core import client_options as client_options_lib
-        
+    def _initialize_llm_and_embeddings(self):
+        """Initialize LLM and embeddings with proper error handling."""
         try:
-            client = genai.Client(
-                api_key=self.config.GOOGLE_API_KEY,
-                client_options=client_options_lib.ClientOptions(
-                    api_endpoint=self.config.GOOGLE_API_BASE
-                )
+            # Initialize Google embeddings
+            logger.info(f"Initializing Google embeddings with model: {self.config.GOOGLE_EMBEDDING_MODEL}")
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model=self.config.GOOGLE_EMBEDDING_MODEL,
+                google_api_key=self.config.GOOGLE_API_KEY
             )
             
-            models = client.list_models()
-            available_models = [model.name for model in models]
-            logger.info(f"Available models: {available_models}")
-            return available_models
+            # Initialize Google LLM
+            logger.info("Initializing Google Generative AI LLM")
+            self.llm = ChatGoogleGenerativeAI(
+                model="gemini-pro",
+                google_api_key=self.config.GOOGLE_API_KEY,
+                temperature=0.1,
+                max_tokens=1024
+            )
+            
+            logger.info("Successfully initialized LLM and embeddings")
             
         except Exception as e:
-            logger.error(f"Error listing models: {str(e)}")
-            return []
-    
-    def _initialize_llm_and_embeddings(self):
-        """Initialize Groq LLM with rate limiting and retry logic."""
-        try:
-            from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-            import requests
-            from groq import Groq
-            
-            # Configure retry decorator for API calls
-            def create_retry_decorator():
-                return retry(
-                    stop=stop_after_attempt(self.config.MAX_RETRIES),
-                    wait=wait_exponential(
-                        multiplier=self.config.RATE_LIMIT_BACKOFF_FACTOR,
-                        min=self.config.RATE_LIMIT_DELAY,
-                        max=self.config.MAX_RATE_LIMIT_DELAY
-                    ),
-                    retry=retry_if_exception_type(requests.exceptions.HTTPError),
-                    before_sleep=lambda retry_state: logger.warning(
-                        f"Rate limited. Retrying in {retry_state.next_action.sleep:.1f} seconds... "
-                        f"(attempt {retry_state.attempt_number}/{self.config.MAX_RETRIES})"
-                    )
-                )
-            
-            @create_retry_decorator()
-            def initialize_groq():
-                logger.info(f"Initializing Groq LLM with model: {self.config.GROQ_MODEL}")
-                client = Groq(
-                    api_key=self.config.GROQ_API_KEY,
-                    timeout=self.config.REQUEST_TIMEOUT
-                )
-                # Test the connection with a lightweight request
-                client.chat.completions.create(
-                    messages=[{"role": "user", "content": "Hello"}],
-                    model=self.config.GROQ_MODEL,
-                    max_tokens=10,
-                    temperature=0.1
-                )
-                logger.info(f"Successfully connected to {self.config.GROQ_MODEL}")
-                return client
-            
-            self.llm = initialize_groq()
-            
-            # Use Groq's embeddings if needed
-            # Note: You might want to implement or configure embeddings separately
-            # based on your requirements
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Groq LLM after {self.config.MAX_RETRIES} attempts: {str(e)}")
-            raise ValueError("Failed to initialize Groq LLM. Please check your GROQ_API_KEY and try again.")
+            logger.error(f"Failed to initialize LLM and embeddings: {str(e)}")
+            raise ValueError("Failed to initialize LLM and embeddings. Please check your API keys.")
     
     def _initialize_vector_store(self):
         """Initialize Chroma vector store in either local or server mode based on configuration."""
         try:
             from chromadb.config import Settings
-            
-            # Initialize embeddings if not already done
-            if not hasattr(self, 'embeddings') or self.embeddings is None:
-                self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model=self.config.GOOGLE_EMBEDDING_MODEL,
-                    google_api_key=self.config.GOOGLE_API_KEY
-                )
             
             # Check if we should use ChromaDB server
             chroma_server_host = os.getenv("CHROMA_SERVER_HOST")
@@ -542,63 +403,6 @@ class EnhancedRAGSystem:
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(f"Vector store initialization failed: {str(e)}")
     
-    def add_documents_batch(self, file_paths: List[str], file_names: List[str] = None) -> Dict[str, Any]:
-        """Process and add multiple documents to the vector store.
-        
-        Args:
-            file_paths: List of file paths to process
-            file_names: Optional list of original file names
-            
-        Returns:
-            Dict containing processing results
-        """
-        if not file_paths:
-            return {"status": "error", "message": "No files provided"}
-            
-        if not file_names:
-            file_names = [os.path.basename(p) for p in file_paths]
-            
-        results = {
-            "status": "success",
-            "processed_files": [],
-            "total_documents": 0,
-            "errors": []
-        }
-        
-        for file_path, file_name in zip(file_paths, file_names):
-            try:
-                logger.info(f"Processing file: {file_name}")
-                
-                # Process the document using your document processor
-                documents = self.document_processor.load_document(file_path, file_name)
-                
-                if not documents:
-                    error_msg = f"No valid content found in {file_name}"
-                    logger.warning(error_msg)
-                    results["errors"].append({"file": file_name, "error": error_msg})
-                    continue
-                
-                # Add to vector store
-                self.vector_store.add_documents(documents)
-                
-                # Update results
-                doc_count = len(documents)
-                results["processed_files"].append({
-                    "file_name": file_name,
-                    "document_count": doc_count
-                })
-                results["total_documents"] += doc_count
-                
-                logger.info(f"Successfully processed {file_name}: {doc_count} document chunks added")
-                
-            except Exception as e:
-                error_msg = f"Error processing {file_name}: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append({"file": file_name, "error": str(e)})
-                results["status"] = "partial_success"
-        
-        return results
-        
     def _initialize_qa_chain(self):
         """Initialize QA chain with enhanced prompt for structured responses."""
         template = """You are an expert financial analyst. Your task is to analyze financial documents and provide clear, structured responses. 
@@ -662,6 +466,66 @@ YOUR RESPONSE:"""
 
         logger.info("QA chain initialized successfully")
 
+    def add_documents_batch(self, file_paths: List[str], file_names: List[str] = None) -> Dict[str, Any]:
+        """Process and add multiple documents to the vector store.
+        
+        Args:
+            file_paths: List of file paths to process
+            file_names: Optional list of original file names
+            
+        Returns:
+            Dict containing processing results
+        """
+        if not file_paths:
+            return {"status": "error", "message": "No files provided"}
+            
+        if not file_names:
+            file_names = [os.path.basename(p) for p in file_paths]
+            
+        results = {
+            "status": "success",
+            "processed_files": [],
+            "total_documents": 0,
+            "errors": []
+        }
+        
+        for file_path, file_name in zip(file_paths, file_names):
+            try:
+                logger.info(f"Processing file: {file_name}")
+                
+                # Process the document using your document processor
+                documents = self.document_processor.load_document(file_path, file_name)
+                
+                if not documents:
+                    error_msg = f"No valid content found in {file_name}"
+                    logger.warning(error_msg)
+                    results["errors"].append({"file": file_name, "error": error_msg})
+                    continue
+                
+                # Split documents into chunks
+                chunks = self.document_processor.split_documents(documents)
+                
+                # Add to vector store
+                self.vector_store.add_documents(chunks)
+                
+                # Update results
+                doc_count = len(chunks)
+                results["processed_files"].append({
+                    "file_name": file_name,
+                    "document_count": doc_count
+                })
+                results["total_documents"] += doc_count
+                
+                logger.info(f"Successfully processed {file_name}: {doc_count} document chunks added")
+                
+            except Exception as e:
+                error_msg = f"Error processing {file_name}: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                results["errors"].append({"file": file_name, "error": str(e)})
+                results["status"] = "partial_success"
+        
+        return results
+
     def query(self, question: str) -> dict:
         """
         Query the RAG system with a question.
@@ -680,8 +544,8 @@ YOUR RESPONSE:"""
             
             # Format the response
             response = {
-                "answer": result["result"],
-                "sources": [
+                "result": result["result"],
+                "source_documents": [
                     {
                         "content": doc.page_content,
                         "metadata": doc.metadata
@@ -690,305 +554,13 @@ YOUR RESPONSE:"""
                 ]
             }
             
-            logger.info(f"Query processed successfully. Answer length: {len(response['answer'])}")
+            logger.info(f"Query processed successfully. Answer length: {len(response['result'])}")
             return response
             
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}", exc_info=True)
             return {"error": f"Failed to process query: {str(e)}"}
 
-    def _get_cached_embeddings(self, text: str) -> Optional[List[float]]:
-        """Get cached embeddings if available."""
-        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
-        with self.cache_lock:
-            return self.embedding_cache.get(text_hash)
-
-    def _cache_embeddings(self, text: str, embedding: List[float]) -> None:
-        """Cache embeddings for future use."""
-        if not text.strip():
-            return
-        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
-        with self.cache_lock:
-            self.embedding_cache[text_hash] = embedding
-
-    def _process_batch_with_cache(self, batch: List[Document]) -> List[Document]:
-        """Process a batch of documents with embedding caching."""
-        if not batch:
-            return []
-            
-        # Check cache first
-        texts_to_embed = []
-        cached_embeddings = {}
-        doc_texts = []
-
-        for doc in batch:
-            if not doc.page_content.strip():
-                continue
-                
-            text = doc.page_content
-            doc_texts.append(text)
-            cached = self._get_cached_embeddings(text)
-            if cached is not None:
-                cached_embeddings[text] = cached
-            else:
-                texts_to_embed.append(text)
-
-        # Get embeddings for non-cached texts
-        if texts_to_embed:
-            try:
-                # Process in smaller batches to avoid timeouts
-                batch_size = self.config.EMBEDDING_BATCH_SIZE
-                for i in range(0, len(texts_to_embed), batch_size):
-                    batch_texts = texts_to_embed[i:i + batch_size]
-                    new_embeddings = self.embeddings.embed_documents(batch_texts)
-                    for text, embedding in zip(batch_texts, new_embeddings):
-                        self._cache_embeddings(text, embedding)
-                        cached_embeddings[text] = embedding
-            except Exception as e:
-                logger.error(f"Error getting embeddings: {str(e)}")
-                logger.exception("Embedding generation error")
-                return []
-
-        # Update documents with embeddings
-        processed_docs = []
-        for doc, text in zip(batch, doc_texts):
-            if text in cached_embeddings:
-                # Create a new document with the embedding in metadata
-                metadata = getattr(doc, 'metadata', {})
-                metadata['embedding'] = cached_embeddings[text]
-                new_doc = Document(
-                    page_content=doc.page_content,
-                    metadata=metadata
-                )
-                processed_docs.append(new_doc)
-        
-        return processed_docs
-
-    def add_documents_batch(self, file_paths: List[str], file_names: List[str] = None) -> Dict[str, Any]:
-        """Process documents with optimized performance and error handling."""
-        if not file_names:
-            file_names = [os.path.basename(p) for p in file_paths]
-            
-        if len(file_paths) != len(file_names):
-            raise ValueError("file_paths and file_names must have the same length")
-        
-        results = {
-            'processed': 0,
-            'failed': 0,
-            'total_chunks': 0,
-            'errors': []
-        }
-        
-        logger.info(f"Processing {len(file_paths)} documents...")
-        
-        try:
-            # Process documents in parallel with a fixed number of workers
-            with ThreadPoolExecutor(max_workers=min(4, len(file_paths))) as executor:
-                # Process each document
-                future_to_docs = {}
-                futures = []
-                
-                # First, load and split all documents
-                for path, name in zip(file_paths, file_names):
-                    future = executor.submit(self.document_processor.load_document, path, name)
-                    futures.append(future)
-                    future_to_docs[future] = (path, name)
-                
-                # Process loaded documents
-                for future in as_completed(futures):
-                    path, name = future_to_docs[future]
-                    try:
-                        documents = future.result()
-                        if not documents:
-                            error_msg = f"Failed to load document: {name}"
-                            logger.error(error_msg)
-                            results['failed'] += 1
-                            results['errors'].append({
-                                'file': name,
-                                'error': error_msg
-                            })
-                            continue
-                        
-                        # Split documents into chunks
-                        try:
-                            chunks = self.document_processor.split_documents(documents)
-                            if not chunks:
-                                error_msg = f"No valid chunks generated from document: {name}"
-                                logger.error(error_msg)
-                                results['failed'] += 1
-                                results['errors'].append({
-                                    'file': name,
-                                    'error': error_msg
-                                })
-                                continue
-                            
-                            # Process chunks in batches
-                            batch_size = 10  # Process 10 chunks at a time
-                            for i in range(0, len(chunks), batch_size):
-                                batch = chunks[i:i + batch_size]
-                                processed_batch = self._process_batch_with_cache(batch)
-                                if processed_batch:
-                                    # Add to vector store
-                                    self.vector_store.add_documents(processed_batch)
-                                    results['processed'] += 1
-                                    results['total_chunks'] += len(processed_batch)
-                                    logger.info(f"Processed batch of {len(processed_batch)} chunks from {name}")
-                            
-                            logger.info(f"Successfully processed document: {name} ({len(chunks)} chunks)")
-                            
-                        except Exception as e:
-                            error_msg = f"Error processing document {name}: {str(e)}"
-                            logger.error(error_msg, exc_info=True)
-                            results['failed'] += 1
-                            results['errors'].append({
-                                'file': name,
-                                'error': error_msg
-                            })
-                            
-                    except Exception as e:
-                        error_msg = f"Unexpected error processing {name}: {str(e)}"
-                        logger.error(error_msg, exc_info=True)
-                        results['failed'] += 1
-                        results['errors'].append({
-                            'file': name,
-                            'error': error_msg
-                        })
-            
-            logger.info(f"Document processing complete. Results: {results}")
-            return results
-            
-        except Exception as e:
-            error_msg = f"Error in document processing: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            raise RuntimeError(error_msg) from e
-
-    def _process_single_batch(self, batch: List[Document], batch_num: int, total_batches: int) -> int:
-        """
-        Process a single batch of documents with retries.
-        
-        Args:
-            batch: List of documents in the batch
-            batch_num: Current batch number
-            total_batches: Total number of batches
-            
-        Returns:
-            int: Number of successfully processed documents in this batch
-        """
-        retry_count = 0
-        max_retries = self.config.MAX_RETRIES
-        
-        while retry_count <= max_retries:
-            try:
-                # Filter out any invalid documents
-                valid_docs = [doc for doc in batch if doc.page_content and doc.page_content.strip()]
-                if not valid_docs:
-                    logger.warning(f"No valid documents in batch {batch_num}")
-                    return 0
-                    
-                # Process the batch with caching
-                processed_docs = self._process_batch_with_cache(valid_docs)
-                if processed_docs:
-                    # Add to vector store
-                    self.vector_store.add_documents(processed_docs)
-                    logger.info(f"Processed batch {batch_num}/{total_batches} with {len(processed_docs)} documents")
-                    return len(processed_docs)
-                return 0
-                
-            except Exception as e:
-                retry_count += 1
-                if retry_count > max_retries:
-                    logger.error(f"Failed to process batch {batch_num} after {max_retries} retries: {str(e)}")
-                    return 0
-                
-                # Exponential backoff
-                delay = self.config.RETRY_DELAY * (2 ** (retry_count - 1))
-                logger.warning(f"Retry {retry_count}/{max_retries} for batch {batch_num} after error: {str(e)}")
-                time.sleep(min(delay, 60))  # Cap delay at 60 seconds
-        
-        return 0
-            
-    def query(self, question, max_retries=3):
-        if not question or not question.strip():
-            error_msg = "Empty question provided"
-            logger.warning(error_msg)
-            return {
-                "result": "Please provide a valid question.",
-                "source_documents": [],
-                "error": error_msg
-            }
-        
-        logger.info(f"Processing query: '{question}'")
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Attempt {attempt + 1}/{max_retries} - Sending to QA chain...")
-                
-                # Check if QA chain is properly initialized
-                if not hasattr(self, 'qa_chain') or self.qa_chain is None:
-                    error_msg = "QA chain not properly initialized"
-                    logger.error(error_msg)
-                    raise RuntimeError(error_msg)
-                
-                # Execute the query
-                result = self.qa_chain({"query": question})
-                logger.info(f"Received response from QA chain")
-                
-                if not result:
-                    error_msg = "Empty response from QA chain"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                
-                # Process source documents
-                source_docs = []
-                source_documents = result.get("source_documents", [])
-                logger.info(f"Found {len(source_documents)} source documents")
-                
-                for i, doc in enumerate(source_documents, 1):
-                    try:
-                        content = doc.page_content
-                        metadata = getattr(doc, 'metadata', {})
-                        source_docs.append({
-                            "content": content[:500] + ("..." if len(content) > 500 else ""),
-                            "metadata": metadata,
-                            "source": metadata.get('source', 'Unknown'),
-                            "page": metadata.get('page', 'N/A')
-                        })
-                        logger.debug(f"Source doc {i}: {metadata.get('source', 'Unknown')} (page {metadata.get('page', 'N/A')})")
-                    except Exception as doc_error:
-                        logger.warning(f"Error processing source document {i}: {str(doc_error)}")
-                
-                response = {
-                    "result": result.get("result", "No answer generated."),
-                    "source_documents": source_docs,
-                    "query": question
-                }
-                
-                logger.info("Query processed successfully")
-                return response
-                
-            except Exception as e:
-                error_msg = f"Query attempt {attempt + 1} failed: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                
-                if attempt == max_retries - 1:
-                    logger.error(f"All {max_retries} attempts failed for query: {question}")
-                    return {
-                        "result": "I encountered an error while processing your query. Please try rephrasing your question or try again later.",
-                        "source_documents": [],
-                        "error": str(e)
-                    }
-                
-                # Exponential backoff before retry
-                wait_time = (2 ** attempt) * 0.5
-                logger.info(f"Retrying in {wait_time} seconds...")
-                time.sleep(wait_time)
-        
-        return {
-            "result": "Maximum retry attempts reached. Please try again later.",
-            "source_documents": [],
-            "error": "Max retries exceeded"
-        }
-        
     def get_statistics(self):
         try:
             doc_count = self.vector_store._collection.count()
@@ -1005,16 +577,12 @@ YOUR RESPONSE:"""
 # Initialize configuration
 config = Config()
 
-# Ensure vector store directory exists and is writable
+# Ensure vector store directory exists (removed chmod calls)
 os.makedirs(config.VECTOR_STORE_DIR, exist_ok=True)
-try:
-    os.chmod(config.VECTOR_STORE_DIR, 0o777)  # Make writable
-except Exception as e:
-    logger.warning(f"Warning: Could not set permissions for {config.VECTOR_STORE_DIR}: {str(e)}")
 
 # Validate configuration
-if not config.GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY environment variable is not set or empty")
+if not config.GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY environment variable is not set or empty")
 
 # Ensure the vector store and cache directories exist
 os.makedirs(config.VECTOR_STORE_DIR, exist_ok=True)
@@ -1023,7 +591,6 @@ os.makedirs(config.CACHE_DIR, exist_ok=True)
 # Initialize RAG system
 try:
     rag_system = EnhancedRAGSystem(config)
-    logger.info(f"Using Groq model: {config.GROQ_MODEL}")
     logger.info("Enhanced RAG system initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize RAG system: {e}")
@@ -1173,7 +740,6 @@ def upload_document():
     # Create a temp directory in the system's temp location
     temp_dir = os.path.join(tempfile.gettempdir(), 'finance_rag_uploads')
     os.makedirs(temp_dir, exist_ok=True)
-    os.chmod(temp_dir, 0o777)  # Ensure write permissions
     
     file_path = os.path.join(temp_dir, secure_filename(file.filename))
     
@@ -1271,7 +837,6 @@ def list_documents():
 
 # Helper function for OPTIONS preflight requests
 def _build_cors_preflight_response():
-    
     return jsonify({"message": "Preflight request successful"}), 200
 
 # Run the application
