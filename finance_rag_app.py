@@ -550,32 +550,59 @@ class EnhancedRAGSystem:
             raise RuntimeError(error_msg)
     
     def _initialize_vector_store(self):
-        """Initialize vector store with proper configuration and error handling."""
+        """Initialize Chroma vector store in either local or server mode based on configuration."""
         try:
-            logger.info(f"Initializing Chroma vector store in: {self.config.VECTOR_STORE_DIR}")
+            from chromadb.config import Settings
             
-            # Create the directory if it doesn't exist
-            os.makedirs(self.config.VECTOR_STORE_DIR, exist_ok=True)
-            
-            # Initialize embeddings if not already initialized
+            # Initialize embeddings if not already done
             if not hasattr(self, 'embeddings') or self.embeddings is None:
                 self.embeddings = GoogleGenerativeAIEmbeddings(
                     model=self.config.GOOGLE_EMBEDDING_MODEL,
                     google_api_key=self.config.GOOGLE_API_KEY
                 )
             
-            # Initialize Chroma vector store with error handling and persistence
-            # Disable telemetry to avoid errors
-            self.vector_store = Chroma(
-                persist_directory=self.config.VECTOR_STORE_DIR,
-                embedding_function=self.embeddings,
-                collection_name=self.config.VECTOR_STORE_COLLECTION,
-                anonymized_telemetry=False  # Explicitly disable telemetry
-            )
+            # Check if we should use ChromaDB server
+            chroma_server_host = os.getenv("CHROMA_SERVER_HOST")
             
-            logger.info("Successfully initialized Chroma vector store")
+            if chroma_server_host:
+                # Server mode
+                chroma_server_port = os.getenv("CHROMA_SERVER_PORT", "8000")
+                chroma_server_ssl = os.getenv("CHROMA_SERVER_SSL", "false").lower() == "true"
+                
+                logger.info(f"Connecting to ChromaDB server at {chroma_server_host}:{chroma_server_port}")
+                
+                chroma_server_settings = Settings(
+                    chroma_api_impl="rest",
+                    chroma_server_host=chroma_server_host,
+                    chroma_server_http_port=chroma_server_port,
+                    chroma_server_ssl_enabled=chroma_server_ssl,
+                )
+                
+                # Add authentication if provided
+                auth_creds = os.getenv("CHROMA_SERVER_AUTH_CREDENTIALS")
+                if auth_creds:
+                    chroma_server_settings.chroma_client_auth_credentials = auth_creds
+                
+                self.vector_store = Chroma(
+                    collection_name=self.config.VECTOR_STORE_COLLECTION,
+                    embedding_function=self.embeddings,
+                    client_settings=chroma_server_settings
+                )
+                logger.info("Successfully connected to ChromaDB server")
+                
+            else:
+                # Local persistence mode (for development)
+                logger.info(f"Initializing local Chroma vector store in: {self.config.VECTOR_STORE_DIR}")
+                os.makedirs(self.config.VECTOR_STORE_DIR, exist_ok=True)
+                
+                self.vector_store = Chroma(
+                    persist_directory=self.config.VECTOR_STORE_DIR,
+                    embedding_function=self.embeddings,
+                    collection_name=self.config.VECTOR_STORE_COLLECTION
+                )
+                logger.info("Successfully initialized local Chroma vector store")
             
-            # Verify the collection exists and is accessible
+            # Verify the collection is accessible
             try:
                 collection = self.vector_store._collection
                 if collection:
@@ -583,7 +610,6 @@ class EnhancedRAGSystem:
                     logger.info(f"Vector store contains {count} documents")
                 else:
                     logger.warning("Failed to verify collection in vector store")
-                    
             except Exception as e:
                 logger.warning(f"Could not get document count: {str(e)}")
             
@@ -1327,19 +1353,21 @@ def _build_cors_preflight_response():
 # Run the application
 if __name__ == "__main__":
     print("\n" + "="*60)
+    port = int(os.environ.get('PORT', 8080))
     print("🚀 Enhanced Finance RAG System Starting...")
     print("="*60)
     print(f"📊 LLM Provider: {config.LLM_PROVIDER}")
     print(f"🔧 Chunk Size: {config.CHUNK_SIZE}")
     print(f"📁 Vector Store: {config.VECTOR_STORE_DIR}")
-    print(f"🔗 URL: http://localhost:8080")
+    print(f"🔗 URL: http://localhost:{port}")
     print("="*60)
     
     try:
+        port = int(os.environ.get('PORT', 8080))  # Use PORT from environment or default to 8080
         app.run(
             debug=False,  # Set to False for production
             host='0.0.0.0',
-            port=8080,
+            port=port,
             threaded=True
         )
     except Exception as e:

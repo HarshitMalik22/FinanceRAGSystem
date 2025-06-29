@@ -1,8 +1,93 @@
 # Finance RAG System
 
-A modern, containerized Finance-focused Retrieval-Augmented Generation (RAG) system with a React TypeScript frontend and Python FastAPI backend, powered by LangChain and Google's Gemini.
+A modern, containerized Finance-focused Retrieval-Augmented Generation (RAG) system with a React TypeScript frontend and Python Flask backend, powered by LangChain, ChromaDB, and Google's Generative AI.
 
-## 🚀 Features
+## 🚀 Quick Start (Development)
+
+### Prerequisites
+- Python 3.10+
+- Node.js 16+
+- Docker & Docker Compose (recommended)
+- API keys for Groq and Google Generative AI
+
+### Local Setup
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/FinanceRAGSystem.git
+   cd FinanceRAGSystem
+   ```
+
+2. **Set up environment variables**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+
+3. **Start with Docker Compose (recommended)**
+   ```bash
+   docker-compose up --build
+   ```
+
+4. **Or run manually**
+   ```bash
+   # Backend
+   python -m venv venv
+   source venv/bin/activate  # Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   python -m nltk.downloader popular
+   python -m spacy download en_core_web_sm
+   python finance_rag_app.py
+   
+   # Frontend (in a new terminal)
+   cd frontend
+   npm install
+   npm start
+   ```
+
+5. **Access the application**
+   - Frontend: http://localhost:3000
+   - API: http://localhost:5000/api
+
+## 🚀 Production Deployment
+
+### Option 1: Deploy to Render (Recommended)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/yourusername/FinanceRAGSystem)
+
+1. Click the "Deploy to Render" button above
+2. Set the required environment variables:
+   - `GROQ_API_KEY`: Your Groq API key
+   - `GOOGLE_API_KEY`: Your Google API key
+   - `FLASK_ENV`: `production`
+3. Click "Create Web Service"
+
+### Option 2: Docker
+
+```bash
+# Build the image
+docker build -t finance-rag-app .
+
+# Run the container
+docker run -p 5000:5000 \
+  -e GROQ_API_KEY=your_groq_key \
+  -e GOOGLE_API_KEY=your_google_key \
+  finance-rag-app
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+
+| Variable           | Description                      | Default        |
+|--------------------|----------------------------------|----------------|
+| `GROQ_API_KEY`    | Groq API key for LLM             | -              |
+| `GOOGLE_API_KEY`  | Google API key for embeddings    | -              |
+| `VECTOR_STORE_DIR`| Directory for ChromaDB storage   | `./chroma_db`  |
+| `FLASK_ENV`       | Flask environment               | `development`  |
+| `PORT`            | Port to run the application     | `5000`         |
+
+## 🎯 Features
 
 - **Modern Web Interface**: Responsive React TypeScript frontend with Material-UI
 - **Document Processing**: Upload and process PDF, DOCX, TXT, CSV, XLSX files
@@ -18,164 +103,24 @@ A modern, containerized Finance-focused Retrieval-Augmented Generation (RAG) sys
 ├── frontend/             # React TypeScript frontend
 │   ├── public/           # Static files
 │   └── src/              # React application source
-│       ├── components/   # Reusable UI components
-│       ├── hooks/        # Custom React hooks
-│       ├── pages/        # Page components
-│       └── services/     # API services
-│
-├── backend/             # Python FastAPI backend
+├── backend/              # Python Flask backend
 │   ├── app/              # Application code
-│   │   ├── api/          # API routes
-│   │   ├── core/         # Core functionality
-│   │   └── models/       # Data models
-│   └── tests/            # Test suite
-│
-├── docker/              # Docker configuration
-├── .github/              # GitHub workflows
-└── docs/                 # Documentation
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Docker 20.10+ and Docker Compose 2.0+
-- Node.js 18+ (for frontend development)
-- Python 3.10+ (for backend development)
-
-### Docker Compose (Recommended)
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/FinanceRAGSystem.git
-   cd FinanceRAGSystem
-   ```
-
-2. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-3. Update `.env` with your API keys and configuration
-
-4. Start the application:
-   ```bash
-   docker-compose up -d
-   ```
-
-5. Access the application at [http://localhost:3000](http://localhost:3000)
-
-### Development Setup
-
-1. Install dependencies:
-   ```bash
-   # Install backend dependencies
-   cd backend
-   poetry install
-   
-   # Install frontend dependencies
-   cd ../frontend
-   npm install
-   ```
-
-2. Start the development servers:
-   ```bash
-   # In one terminal (backend)
-   cd backend
-   poetry run uvicorn app.main:app --reload
-   
-   # In another terminal (frontend)
-   cd frontend
-   npm start
-   ```
-
-## 🐳 Deployment
-
-### Production Deployment
-
-1. Build and start the production stack:
-   ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-   ```
-
-2. The application will be available on port 3000
-
-### Cloud Deployment
-
-#### Google Cloud Run
-
-```bash
-# Build and push the container
-gcloud builds submit --tag gcr.io/your-project-id/finance-rag
-
-# Deploy to Cloud Run
-gcloud run deploy finance-rag \
-  --image gcr.io/your-project-id/finance-rag \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars "GOOGLE_API_KEY=your-api-key"
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Create a `.env` file based on `.env.example` with the following variables:
-
-```env
-# Backend
-PORT=8080
-ENVIRONMENT=development
-DEBUG=True
-
-# Frontend
-REACT_APP_API_URL=http://localhost:8080
-
-# LLM Configuration
-LLM_PROVIDER=google  # google or openai
-GOOGLE_API_KEY=your-google-api-key
-# OPENAI_API_KEY=your-openai-api-key
-
-# Database
-DATABASE_URL=postgresql://user:password@db:5432/financerag
-
-# Security
-SECRET_KEY=your-secret-key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
-```
-
-## 🧪 Testing
-
-Run the test suite:
-
-```bash
-# Backend tests
-cd backend
-poetry run pytest
-
-# Frontend tests
-cd frontend
-npm test
-
-# End-to-end tests
-npm run test:e2e
+│   ├── tests/            # Backend tests
+│   └── requirements.txt  # Python dependencies
+├── docker/               # Docker configuration
+├── docker-compose.yml    # Local development
+└── render.yaml           # Render.com deployment config
 ```
 
 ## 📚 Documentation
 
-- [API Documentation](http://localhost:8080/docs) (available when running locally)
-- [Frontend Documentation](./frontend/README.md)
-- [Backend Documentation](./backend/README.md)
+- [API Documentation](docs/API.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Deployment Guide](docs/DEPLOYMENT.md)
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## 📄 License
 
@@ -183,8 +128,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [LangChain](https://github.com/hwchase17/langchain)
-- [Google Gemini](https://ai.google.dev/)
+- [LangChain](https://github.com/langchain-ai/langchain)
+- [ChromaDB](https://github.com/chroma-core/chroma)
+- [Google Generative AI](https://ai.google/)
 - [React](https://reactjs.org/)
-- [FastAPI](https://fastapi.tiangolo.com/)
 - [Material-UI](https://mui.com/)

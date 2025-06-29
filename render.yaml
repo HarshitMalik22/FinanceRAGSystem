@@ -2,11 +2,22 @@
 # See: https://render.com/docs/blueprint-spec
 
 services:
+  # Main Application Service with Embedded ChromaDB
   - type: web
-    name: finance-rag-backend
+    name: finance-rag-app
     plan: free
-    buildCommand: "chmod +x setup.sh && ./setup.sh"
-    startCommand: "gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 120 finance_rag_app:app"
+    runtime: python
+    buildCommand: |
+      pip install -r requirements.txt
+      python -m nltk.downloader popular
+      python -m spacy download en_core_web_sm
+    startCommand: >-
+      gunicorn --bind :$PORT 
+      --workers 2 
+      --threads 4 
+      --timeout 120 
+      --preload 
+      finance_rag_app:app
     envVars:
       - key: PYTHON_VERSION
         value: "3.10"
@@ -26,7 +37,8 @@ services:
         value: "10000"
 
 # Deployment Notes:
-# 1. The setup script (setup.sh) will handle the initial setup
-# 2. Environment variables marked with sync: false must be set in the Render dashboard
-# 3. The vector store will persist in /opt/render/project/src/chroma_db
-# 4. The application will be available at the Render-provided URL
+# 1. Set the following environment variables in the Render dashboard:
+#    - GROQ_API_KEY: Your Groq API key
+#    - GOOGLE_API_KEY: Your Google API key
+# 2. The application will be available at the Render-provided URL
+# 3. For production, consider using a managed vector database like Pinecone or Weaviate

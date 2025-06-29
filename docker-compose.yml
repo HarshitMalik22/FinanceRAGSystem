@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_AUTH_CREDENTIALS=admin:admin  # Change these in production
+      - CHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.basic.BasicAuthServerProvider
+      - CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER=chromadb.auth.basic.BasicAuthCredentialsProvider
+      - CHROMA_SERVER_AUTH_CREDENTIALS_FILE=/chroma/chroma/.chroma_auth
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - CHROMA_SERVER_HOST=chromadb
+      - CHROMA_SERVER_PORT=8000
+      - CHROMA_SERVER_SSL=false
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - VECTOR_STORE_DIR=/app/chroma_db
+      - FLASK_APP=finance_rag_app.py
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - .:/app
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
