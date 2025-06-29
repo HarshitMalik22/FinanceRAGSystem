@@ -3,15 +3,14 @@ import os
 from typing import Optional
 
 class Config:
-    """Application configuration."""
+    """Application configuration with rate limiting and retry settings."""
     
     # Document processing
     CHUNK_SIZE = 1500
     CHUNK_OVERLAP = 200
     
-    # API Keys (should be set via environment variables)
+    # API Key for Groq (should be set via environment variable)
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
     
     # Model configuration
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -20,10 +19,13 @@ class Config:
     VECTOR_STORE_DIR: str = os.getenv("VECTOR_STORE_DIR", "/app/chroma_db")
     VECTOR_STORE_COLLECTION: str = os.getenv("VECTOR_STORE_COLLECTION", "financial_docs")
     
-    # Performance settings
-    MAX_WORKERS: int = min(8, (os.cpu_count() or 4) * 2)
-    MAX_RETRIES: int = 3
-    REQUEST_TIMEOUT: int = 60  # seconds
+    # Rate limiting and retry settings
+    MAX_WORKERS: int = min(4, (os.cpu_count() or 2) * 2)  # Reduced workers to avoid rate limits
+    MAX_RETRIES: int = 5  # Increased max retries
+    REQUEST_TIMEOUT: int = 120  # Increased timeout to 120 seconds
+    RATE_LIMIT_DELAY: float = 2.0  # Base delay between requests in seconds
+    MAX_RATE_LIMIT_DELAY: float = 60.0  # Maximum delay between retries
+    RATE_LIMIT_BACKOFF_FACTOR: float = 2.0  # Exponential backoff factor
     
     # Application settings
     DEBUG: bool = os.getenv("FLASK_ENV", "production").lower() != "production"
@@ -32,7 +34,7 @@ class Config:
     @classmethod
     def validate(cls) -> None:
         """Validate required configuration."""
-        required_vars = ["GROQ_API_KEY", "GOOGLE_API_KEY"]
+        required_vars = ["GROQ_API_KEY"]
         missing = [var for var in required_vars if not getattr(cls, var)]
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")

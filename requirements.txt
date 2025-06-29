@@ -9,8 +9,6 @@ langchain
 langchain-core
 langchain-community
 langchain-groq
-langchain-google-genai
-google-generativeai
 groq
 langchain-chroma
 
@@ -33,6 +31,7 @@ numpy
 # Utilities
 tqdm
 python-multipart
+tenacity
 
 # Server
 gunicorn

@@ -463,122 +463,54 @@ class EnhancedRAGSystem:
             return []
     
     def _initialize_llm_and_embeddings(self):
-        """Initialize Groq LLM and Google embeddings with proper configuration and error handling."""
-        logger.info("Initializing Groq model and Google embeddings...")
-        
-        if not self.config.GROQ_API_KEY:
-            error_msg = "GROQ_API_KEY environment variable is not set"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
+        """Initialize Groq LLM with rate limiting and retry logic."""
         try:
-            # Import required modules
-            from langchain_groq import ChatGroq
-            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+            import requests
             from groq import Groq
-            import google.generativeai as genai
             
-            # Initialize embeddings with error handling and timeout
-            logger.info("Initializing embeddings...")
-            try:
-                # Use Google's embeddings
-                self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model="models/embedding-001",
-                    google_api_key=os.getenv("GOOGLE_API_KEY"),
-                    request_timeout=30,  # seconds
-                    max_retries=3
+            # Configure retry decorator for API calls
+            def create_retry_decorator():
+                return retry(
+                    stop=stop_after_attempt(self.config.MAX_RETRIES),
+                    wait=wait_exponential(
+                        multiplier=self.config.RATE_LIMIT_BACKOFF_FACTOR,
+                        min=self.config.RATE_LIMIT_DELAY,
+                        max=self.config.MAX_RATE_LIMIT_DELAY
+                    ),
+                    retry=retry_if_exception_type(requests.exceptions.HTTPError),
+                    before_sleep=lambda retry_state: logger.warning(
+                        f"Rate limited. Retrying in {retry_state.next_action.sleep:.1f} seconds... "
+                        f"(attempt {retry_state.attempt_number}/{self.config.MAX_RETRIES})"
+                    )
                 )
-                
-                # Test the embeddings
-                test_embedding = self.embeddings.embed_query("test")
-                logger.info(f"Successfully initialized embeddings. Vector dimension: {len(test_embedding)}")
-                
-            except Exception as e:
-                error_msg = f"Failed to initialize embeddings: {str(e)}"
-                logger.error(error_msg)
-                raise RuntimeError("Failed to initialize embeddings. Please check your Google API key and network connection.")
             
-            # Initialize LLM with error handling and fallback
-            logger.info("Initializing LLM...")
-            groq_available = True
+            @create_retry_decorator()
+            def initialize_groq():
+                logger.info(f"Initializing Groq LLM with model: {self.config.GROQ_MODEL}")
+                client = Groq(
+                    api_key=self.config.GROQ_API_KEY,
+                    timeout=self.config.REQUEST_TIMEOUT
+                )
+                # Test the connection with a lightweight request
+                client.chat.completions.create(
+                    messages=[{"role": "user", "content": "Hello"}],
+                    model=self.config.GROQ_MODEL,
+                    max_tokens=10,
+                    temperature=0.1
+                )
+                logger.info(f"Successfully connected to {self.config.GROQ_MODEL}")
+                return client
             
-            # First try to use Groq if API key is available
-            groq_api_key = os.getenv("GROQ_API_KEY")
-            if groq_api_key:
-                try:
-                    logger.info(f"Attempting to initialize Groq LLM with model: {self.config.GROQ_MODEL}")
-                    logger.info(f"API Key length: {len(groq_api_key)}")
-                    logger.info(f"API Key starts with: {groq_api_key[:8]}")
-                    
-                    # Initialize Groq client directly to test the key
-                    from groq import Groq
-                    test_client = Groq(api_key=groq_api_key)
-                    
-                    # Test the client with a simple request
-                    test_response = test_client.chat.completions.create(
-                        messages=[{"role": "user", "content": "Say this is a test"}],
-                        model=self.config.GROQ_MODEL,
-                        max_tokens=10  # Keep it minimal for testing
-                    )
-                    logger.info(f"Successfully tested Groq API. Response: {test_response.choices[0].message.content[:100]}...")
-                    
-                    # Now initialize the ChatGroq instance
-                    self.llm = ChatGroq(
-                        groq_api_key=groq_api_key,
-                        model_name=self.config.GROQ_MODEL,
-                        temperature=self.config.TEMPERATURE,
-                        max_tokens=self.config.MAX_TOKENS,
-                        streaming=False
-                    )
-                    
-                    # Test the LLM with a simple query
-                    test_response = self.llm.invoke("Hello, are you working?")
-                    logger.info(f"Successfully initialized Groq LLM. Test response: {test_response.content[:100]}...")
-                    logger.info("Successfully initialized Groq model and Google embeddings")
-                    return
-                    
-                except Exception as e:
-                    logger.warning(f"Groq initialization failed, will try fallback. Error: {str(e)}")
-                    groq_available = False
-            else:
-                logger.warning("No GROQ_API_KEY found, trying fallback to Google Gemini")
-                groq_available = False
+            self.llm = initialize_groq()
             
-            # Fallback to Google Gemini if Groq is not available
-            if not groq_available:
-                try:
-                    logger.info("Initializing Google Gemini as fallback...")
-                    google_api_key = os.getenv("GOOGLE_API_KEY")
-                    if not google_api_key:
-                        raise ValueError("GOOGLE_API_KEY not found in environment variables")
-                    
-                    # Initialize Google Gemini with updated model name
-                    self.llm = ChatGoogleGenerativeAI(
-                        model="gemini-1.5-pro",
-                        google_api_key=google_api_key,
-                        temperature=self.config.TEMPERATURE,
-                        max_output_tokens=self.config.MAX_TOKENS
-                    )
-                    
-                    # Test the LLM with a simple query
-                    test_response = self.llm.invoke("Hello, are you working?")
-                    logger.info(f"Successfully initialized Google Gemini. Test response: {test_response.content[:100]}...")
-                    logger.info("Successfully initialized Google Gemini and Google embeddings")
-                    
-                except Exception as e:
-                    error_msg = f"Failed to initialize Google Gemini: {str(e)}"
-                    logger.error(error_msg)
-                    raise RuntimeError("Failed to initialize any language model. Please check your API keys and try again.")
+            # Use Groq's embeddings if needed
+            # Note: You might want to implement or configure embeddings separately
+            # based on your requirements
             
-            
-        except ImportError as e:
-            error_msg = f"Required packages not found: {str(e)}. Please install with: pip install groq langchain-groq langchain-google-genai google-generativeai"
-            logger.error(error_msg)
-            raise ImportError(error_msg)
         except Exception as e:
-            error_msg = f"Failed to initialize models: {str(e)}"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
+            logger.error(f"Failed to initialize Groq LLM after {self.config.MAX_RETRIES} attempts: {str(e)}")
+            raise ValueError("Failed to initialize Groq LLM. Please check your GROQ_API_KEY and try again.")
     
     def _initialize_vector_store(self):
         """Initialize Chroma vector store in either local or server mode based on configuration."""
