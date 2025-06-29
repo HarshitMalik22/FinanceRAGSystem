@@ -1,27 +1,15 @@
 {
   "name": "finance-rag-system",
   "version": "1.0.0",
-  "description": "Enhanced Finance RAG System with React frontend and Python backend",
-  "main": "finance_rag_app.py",
+  "description": "Finance RAG System with React Frontend",
+  "main": "index.js",
   "scripts": {
-    "start": "concurrently \"npm run start:frontend\" \"npm run start:backend\"",
-    "start:frontend": "cd frontend && npm start",
-    "start:backend": "python finance_rag_app.py",
+    "dev": "cd frontend && npm start",
     "build": "cd frontend && npm run build",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "install:all": "npm install && cd frontend && npm install"
+    "install-frontend": "cd frontend && npm install",
+    "start": "source venv/bin/activate && python finance_rag_app.py"
   },
-  "dependencies": {
-    "concurrently": "^8.2.2"
-  },
-  "devDependencies": {},
-  "keywords": [
-    "finance",
-    "rag",
-    "ai",
-    "langchain",
-    "react"
-  ],
+  "keywords": ["finance", "rag", "ai", "react"],
   "author": "",
   "license": "MIT"
 }
