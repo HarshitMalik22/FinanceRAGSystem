@@ -31,6 +31,10 @@ class Config:
     DEBUG: bool = os.getenv("FLASK_ENV", "production").lower() != "production"
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
     
+    # Cache settings
+    ENABLE_CACHING: bool = os.getenv("ENABLE_CACHING", "true").lower() == "true"
+    CACHE_DIR: str = os.getenv("CACHE_DIR", "./document_cache")
+    
     @classmethod
     def validate(cls) -> None:
         """Validate required configuration."""
