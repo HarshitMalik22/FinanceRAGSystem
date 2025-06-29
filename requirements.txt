@@ -1,57 +1,58 @@
 # Core Framework
-flask
-flask-cors
-python-dotenv
-Werkzeug
-protobuf<4.0.0,>=3.20.3
+flask==2.3.3
+flask-cors==4.0.0
+python-dotenv==1.0.0
+Werkzeug==2.3.7
+
+# Protobuf - specific version to avoid conflicts
+protobuf==3.20.3
 
 # LangChain and AI
-langchain
-langchain-core
-langchain-community
-langchain-groq
-groq
-langchain-chroma
+langchain==0.0.354
+langchain-core==0.1.3
+langchain-community==0.0.10
+langchain-groq==0.0.1
+groq==0.4.1
+langchain-chroma==0.1.0
 
 # Vector Database
-chromadb
+chromadb==0.4.22
 
 # Document Processing
-PyPDF2
-python-docx
-openpyxl
-unstructured
-python-magic
-pdfplumber
-pymupdf
+PyPDF2==3.0.1
+python-docx==0.8.11
+openpyxl==3.1.2
+unstructured==0.11.8
+python-magic==0.4.27
+pdfplumber==0.9.0
+pymupdf==1.23.14
 
 # Data Processing
-pandas
-numpy
+pandas==2.1.4
+numpy==1.24.4
 
 # Utilities
-tqdm
-python-multipart
-tenacity
+tqdm==4.66.1
+python-multipart==0.0.6
+tenacity==8.2.3
 
 # Server
-gunicorn
+gunicorn==21.2.0
 
 # Database
-psycopg2-binary
+psycopg2-binary==2.9.9
 
 # Text Processing
-nltk
-spacy
+nltk==3.8.1
+spacy==3.7.2
 
 # Google AI
-langchain-google-genai
+langchain-google-genai==0.0.6
+google-generativeai==0.3.2
 
-# Dash components
-dash
-dash-bootstrap-components
-dash-core-components
-dash-html-components
-plotly
-requests
-beautifulsoup4
+# Additional dependencies for stability
+requests==2.31.0
+urllib3==2.1.0
+certifi==2023.11.17
+charset-normalizer==3.3.2
+idna==3.6

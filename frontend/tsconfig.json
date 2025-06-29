@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "es5",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "es6"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -14,15 +18,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "@emotion/react",
-    "baseUrl": "./src",
-    "paths": {
-      "*": ["src/*"]
-    },
-    "allowImportingTsExtensions": true,
-    "types": ["node", "jest", "@emotion/react", "@emotion/styled"]
+    "jsx": "react-jsx"
   },
-  "include": ["src"],
-  "exclude": ["node_modules"]
+  "include": [
+    "src"
+  ]
 }
