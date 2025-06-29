@@ -100,49 +100,10 @@ from tqdm import tqdm
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Enhanced Configuration
-class Config:
-    # Document processing - optimized for speed
-    CHUNK_SIZE = 2000  # Increased chunk size to reduce total chunks
-    CHUNK_OVERLAP = 50  # Reduced overlap for faster processing
-    MAX_BATCH_SIZE = 100  # Smaller batch size for more responsive processing
-    
-    # Groq Configuration
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    if not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY environment variable is required")
-        
-    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    
-    # Google Configuration (for embeddings)
-    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-    if not GOOGLE_API_KEY:
-        raise ValueError("GOOGLE_API_KEY environment variable is required for embeddings")
-    
-    GOOGLE_EMBEDDING_MODEL = "models/embedding-001"
-    
-    # LLM Provider (for compatibility with existing code)
-    LLM_PROVIDER = "Groq"
-    
-    # Vector store configuration
-    VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "./chroma_db")
-    VECTOR_STORE_COLLECTION = os.getenv("VECTOR_STORE_COLLECTION", "financial_documents")
-    
-    # Performance settings - optimized for speed
-    MAX_WORKERS = min(16, (os.cpu_count() or 4) * 2)  # Use 2x CPU cores, max 16
-    TEMPERATURE = 0.1
-    MAX_TOKENS = 1000
-    TOP_K_RETRIEVAL = 6
-    
-    # Cache settings - enable aggressive caching
-    ENABLE_CACHING = True
-    CACHE_DIR = "./document_cache"
-    
-    # Performance tuning
-    EMBEDDING_BATCH_SIZE = 64  # Batch size for embedding operations
-    MAX_RETRIES = 3  # Number of retries for failed operations
-    RETRY_DELAY = 1.0  # Initial retry delay in seconds
+# Import configuration
+from config import Config
 
+# DocumentProcessor class
 class DocumentProcessor:
     """Enhanced document processor for handling large volumes of documents."""
     
