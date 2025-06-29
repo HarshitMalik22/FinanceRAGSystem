@@ -6,6 +6,7 @@ using LangChain with proper LLM API integration and optimized for large document
 
 # Load environment variables first
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -17,9 +18,25 @@ env_path = script_dir / '.env'
 print(f"Loading environment from: {env_path}")
 load_dotenv(env_path, override=True)
 
-# Verify the API key is loaded
-print(f"GROQ_API_KEY loaded: {'Yes' if os.getenv('GROQ_API_KEY') else 'No'}")
-print(f"GOOGLE_API_KEY loaded: {'Yes' if os.getenv('GOOGLE_API_KEY') else 'No'}")
+# Verify the API keys are loaded and valid
+groq_key = os.getenv('GROQ_API_KEY')
+google_key = os.getenv('GOOGLE_API_KEY')
+
+print(f"GROQ_API_KEY loaded: {'Yes' if groq_key else 'No'}")
+print(f"GOOGLE_API_KEY loaded: {'Yes' if google_key else 'No'}")
+
+# Validate API keys before proceeding
+if not groq_key or groq_key.strip() == '':
+    print("❌ ERROR: GROQ_API_KEY is not set or empty in .env file")
+    print("Please add a valid GROQ API key to the .env file")
+    sys.exit(1)
+
+if not google_key or google_key.strip() == '':
+    print("❌ ERROR: GOOGLE_API_KEY is not set or empty in .env file")
+    print("Please add a valid Google API key to the .env file")
+    sys.exit(1)
+
+print("✅ API keys validation passed")
 
 import uuid
 import json
@@ -65,7 +82,10 @@ from langchain_core.runnables import RunnableLambda
 from tqdm import tqdm
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Configuration class
@@ -649,12 +669,8 @@ YOUR RESPONSE:"""
 # Initialize configuration
 config = Config()
 
-# Ensure vector store directory exists (removed chmod calls)
+# Ensure vector store directory exists
 os.makedirs(config.VECTOR_STORE_DIR, exist_ok=True)
-
-# Validate configuration
-if not config.GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY environment variable is not set or empty")
 
 # Ensure the vector store and cache directories exist
 os.makedirs(config.VECTOR_STORE_DIR, exist_ok=True)
@@ -662,11 +678,13 @@ os.makedirs(config.CACHE_DIR, exist_ok=True)
 
 # Initialize RAG system
 try:
+    print("🔧 Initializing Enhanced RAG system...")
     rag_system = EnhancedRAGSystem(config)
-    logger.info("Enhanced RAG system initialized successfully")
+    print("✅ Enhanced RAG system initialized successfully")
 except Exception as e:
+    print(f"❌ Failed to initialize RAG system: {e}")
     logger.error(f"Failed to initialize RAG system: {e}")
-    raise
+    sys.exit(1)
 
 # Initialize Flask server with correct paths
 frontend_path = os.path.abspath('frontend_build')
@@ -687,6 +705,8 @@ threads = 4
 # Allow both local development and production URLs
 allowed_origins = [
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://localhost:3000",
     "https://financeragsystem.onrender.com"
 ]
 
@@ -706,6 +726,25 @@ CORS(
 
 # Track uploaded documents
 uploaded_documents = {}
+
+# Health check endpoint
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to verify the backend is running."""
+    try:
+        stats = rag_system.get_statistics()
+        return jsonify({
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "stats": stats
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 # API endpoint to query documents
 @app.route('/api/query', methods=['POST', 'OPTIONS'])
@@ -909,22 +948,27 @@ def list_documents():
 
 # Helper function for OPTIONS preflight requests
 def _build_cors_preflight_response():
-    return jsonify({"message": "Preflight request successful"}), 200
+    response = jsonify({"message": "Preflight request successful"})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
+    response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+    return response
 
 # Run the application
 if __name__ == "__main__":
     print("\n" + "="*60)
-    port = int(os.environ.get('PORT', 5000))
     print("🚀 Enhanced Finance RAG System Starting...")
     print("="*60)
     print(f"📊 LLM Provider: {config.LLM_PROVIDER}")
     print(f"🔧 Chunk Size: {config.CHUNK_SIZE}")
     print(f"📁 Vector Store: {config.VECTOR_STORE_DIR}")
-    print(f"🔗 URL: http://localhost:{port}")
-    print("="*60)
     
     try:
-        port = int(os.environ.get('PORT', 5000))  # Use PORT from environment or default to 5000
+        port = int(os.environ.get('PORT', 5000))
+        print(f"🔗 URL: http://localhost:{port}")
+        print(f"🏥 Health Check: http://localhost:{port}/api/health")
+        print("="*60)
+        
         app.run(
             debug=False,  # Set to False for production
             host='0.0.0.0',
@@ -934,5 +978,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Failed to start application: {e}")
         print(f"❌ Application failed to start: {e}")
+        sys.exit(1)
     
     print("\n👋 Application stopped")
