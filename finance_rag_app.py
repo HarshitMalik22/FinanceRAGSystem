@@ -564,58 +564,27 @@ class EnhancedRAGSystem:
                     google_api_key=self.config.GOOGLE_API_KEY
                 )
             
-            # Disable Chroma telemetry
-            import chromadb
-            from chromadb.config import Settings as ChromaSettings
-            
-            # Configure Chroma client settings
-            client_settings = ChromaSettings(
-                chroma_db_impl="duckdb+parquet",
-                persist_directory=self.config.VECTOR_STORE_DIR,
-                anonymized_telemetry=False
-            )
-            
-            # Initialize Chroma client
-            client = chromadb.PersistentClient(
-                path=self.config.VECTOR_STORE_DIR,
-                settings=client_settings
-            )
-            
-            # Get or create the collection
-            try:
-                collection = client.get_collection(name=self.config.VECTOR_STORE_COLLECTION)
-                logger.info(f"Using existing collection: {self.config.VECTOR_STORE_COLLECTION}")
-            except Exception as e:
-                logger.info(f"Creating new collection: {self.config.VECTOR_STORE_COLLECTION}")
-                collection = client.create_collection(
-                    name=self.config.VECTOR_STORE_COLLECTION,
-                    metadata={"hnsw:space": "cosine"}  # Optimize for similarity search
-                )
-            
-            # Initialize the LangChain Chroma wrapper
+            # Initialize Chroma with the new client API
             self.vector_store = Chroma(
-                client=client,
-                collection_name=self.config.VECTOR_STORE_COLLECTION,
+                persist_directory=self.config.VECTOR_STORE_DIR,
                 embedding_function=self.embeddings,
-                collection_metadata={"hnsw:space": "cosine"}
+                collection_name=self.config.VECTOR_STORE_COLLECTION
             )
             
-            logger.info("Chroma vector store initialized successfully")
+            logger.info("Successfully initialized Chroma vector store")
             
-            # Verify the collection exists and get document count
+            # Verify the collection exists and is accessible
             try:
                 collection = self.vector_store._collection
-                if collection is not None:
-                    doc_count = collection.count()
-                    logger.info(f"Vector store initialized with {doc_count} documents in collection '{self.config.VECTOR_STORE_COLLECTION}'")
+                if collection:
+                    count = collection.count()
+                    logger.info(f"Vector store contains {count} documents")
                 else:
                     logger.warning("Failed to verify collection in vector store")
+                    
             except Exception as e:
                 logger.warning(f"Could not get document count: {str(e)}")
             
-            # Skip test document addition in production
-            logger.debug("Skipping test document addition in production")
-                
         except Exception as e:
             error_msg = f"Failed to initialize vector store: {str(e)}"
             logger.error(error_msg, exc_info=True)
