@@ -27,9 +27,12 @@ import json
 import time
 import logging
 import tempfile
+import threading
+import hashlib
+import pickle
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 # Flask imports
@@ -91,8 +94,7 @@ import hashlib
 import pickle
 from tqdm import tqdm
 
-# Load environment variables
-load_dotenv()
+# Remove duplicate dotenv loading - already loaded at the top of the file
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -719,12 +721,20 @@ def _cache_embeddings(self, text: str, embedding: List[float]) -> None:
 
 def _process_batch_with_cache(self, batch: List[Document]) -> List[Document]:
     """Process a batch of documents with embedding caching."""
+    if not batch:
+        return []
+        
     # Check cache first
     texts_to_embed = []
     cached_embeddings = {}
+    doc_texts = []
 
     for doc in batch:
+        if not doc.page_content.strip():
+            continue
+            
         text = doc.page_content
+        doc_texts.append(text)
         cached = self._get_cached_embeddings(text)
         if cached is not None:
             cached_embeddings[text] = cached
@@ -734,16 +744,33 @@ def _process_batch_with_cache(self, batch: List[Document]) -> List[Document]:
     # Get embeddings for non-cached texts
     if texts_to_embed:
         try:
-            new_embeddings = self.embeddings.embed_documents(texts_to_embed)
-            for text, embedding in zip(texts_to_embed, new_embeddings):
-                self._cache_embeddings(text, embedding)
-                cached_embeddings[text] = embedding
+            # Process in smaller batches to avoid timeouts
+            batch_size = self.config.EMBEDDING_BATCH_SIZE
+            for i in range(0, len(texts_to_embed), batch_size):
+                batch_texts = texts_to_embed[i:i + batch_size]
+                new_embeddings = self.embeddings.embed_documents(batch_texts)
+                for text, embedding in zip(batch_texts, new_embeddings):
+                    self._cache_embeddings(text, embedding)
+                    cached_embeddings[text] = embedding
         except Exception as e:
             logger.error(f"Error getting embeddings: {str(e)}")
+            logger.exception("Embedding generation error")
             return []
 
     # Update documents with embeddings
-    for doc in batch:
+    processed_docs = []
+    for doc, text in zip(batch, doc_texts):
+        if text in cached_embeddings:
+            # Create a new document with the embedding in metadata
+            metadata = getattr(doc, 'metadata', {})
+            metadata['embedding'] = cached_embeddings[text]
+            new_doc = Document(
+                page_content=doc.page_content,
+                metadata=metadata
+            )
+            processed_docs.append(new_doc)
+    
+    return processed_docs
 
 def add_documents_batch(self, file_paths: List[str], file_names: List[str] = None) -> Dict[str, Any]:
     """Process documents with optimized performance and error handling."""
@@ -762,51 +789,85 @@ def add_documents_batch(self, file_paths: List[str], file_names: List[str] = Non
     
     logger.info(f"Processing {len(file_paths)} documents...")
     
-    # Process documents in parallel with a fixed number of workers
-    with ThreadPoolExecutor(max_workers=min(4, len(file_paths))) as executor:
-        # Process each document
-        future_to_name = {
-            executor.submit(self._process_single_document, path, name): name
-            for path, name in zip(file_paths, file_names)
-        }
-        
-        # Process results as they complete
-        for future in as_completed(future_to_name):
-            name = future_to_name[future]
+    try:
+        # Process documents in parallel with a fixed number of workers
+        with ThreadPoolExecutor(max_workers=min(4, len(file_paths))) as executor:
+            # Process each document
+            future_to_docs = {}
+            futures = []
             
-            for batch_num in range(total_batches):
-                start_idx = batch_num * batch_size
-                end_idx = min((batch_num + 1) * batch_size, len(chunks))
-                batch = chunks[start_idx:end_idx]
-                
-                # Submit batch processing task
-                future = executor.submit(
-                    self._process_single_batch,
-                    batch,
-                    batch_num + 1,
-                    total_batches
-                )
+            # First, load and split all documents
+            for path, name in zip(file_paths, file_names):
+                future = executor.submit(self.document_processor.load_document, path, name)
                 futures.append(future)
+                future_to_docs[future] = (path, name)
             
-            # Process completed futures
+            # Process loaded documents
             for future in as_completed(futures):
+                path, name = future_to_docs[future]
                 try:
-                    batch_added = future.result()
-                    added_count += batch_added
+                    documents = future.result()
+                    if not documents:
+                        error_msg = f"Failed to load document: {name}"
+                        logger.error(error_msg)
+                        results['failed'] += 1
+                        results['errors'].append(error_msg)
+                        continue
+                    
+                    # Process document chunks
+                    chunks = self.document_processor.split_documents(documents)
+                    if not chunks:
+                        error_msg = f"No chunks generated from document: {name}"
+                        logger.warning(error_msg)
+                        results['failed'] += 1
+                        results['errors'].append(error_msg)
+                        continue
+                    
+                    # Process chunks in batches
+                    batch_size = self.config.EMBEDDING_BATCH_SIZE
+                    total_batches = (len(chunks) + batch_size - 1) // batch_size
+                    
+                    # Process each batch
+                    batch_futures = []
+                    for i in range(total_batches):
+                        batch = chunks[i * batch_size:(i + 1) * batch_size]
+                        batch_future = executor.submit(
+                            self._process_batch_with_cache,
+                            batch
+                        )
+                        batch_futures.append(batch_future)
+                    
+                    # Collect results
+                    for batch_future in as_completed(batch_futures):
+                        try:
+                            processed_docs = batch_future.result()
+                            if processed_docs:
+                                self.vector_store.add_documents(processed_docs)
+                                results['processed'] += len(processed_docs)
+                                results['total_chunks'] += len(processed_docs)
+                        except Exception as e:
+                            error_msg = f"Error processing batch from {name}: {str(e)}"
+                            logger.error(error_msg)
+                            results['failed'] += 1
+                            results['errors'].append(error_msg)
+                    
+                    logger.info(f"Processed {len(chunks)} chunks from {name}")
+                    
                 except Exception as e:
-                    logger.error(f"Error processing batch: {str(e)}")
-                    batch_errors += 1
-                    if batch_errors >= 3:  # If we fail 3 times in a row, give up
-                        raise RuntimeError("Too many batch processing errors") from e
+                    error_msg = f"Error processing document {name}: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    results['failed'] += 1
+                    results['errors'].append(error_msg)
         
-        success_ratio = (added_count / len(chunks)) * 100 if chunks else 0
-        logger.info(
-            f"Added {added_count}/{len(chunks)} documents to vector store "
-            f"({success_ratio:.1f}% success rate)"
-        )
+        logger.info(f"Batch processing completed. Results: {results}")
+        return results
         
-        # Persistence is handled automatically by Chroma 0.4.x+
-        return added_count
+    except Exception as e:
+        error_msg = f"Unexpected error in add_documents_batch: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        results['errors'].append(error_msg)
+        results['failed'] = len(file_paths) - results['processed']
+        return results
         
     def _process_single_batch(self, batch: List[Document], batch_num: int, total_batches: int) -> int:
         """
@@ -1183,7 +1244,6 @@ def upload_document():
                 os.remove(file_path)
                 logger.info(f"Temporary file removed: {file_path}")
         except Exception as e:
-            logger.error(f"Error removing temporary file {file_path}: {str(e)}")
             logger.error(f"Error removing temporary file {file_path}: {str(e)}")
 
 # API endpoint to list documents
