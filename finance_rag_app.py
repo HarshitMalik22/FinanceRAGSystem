@@ -698,16 +698,8 @@ YOUR RESPONSE:"""
             chain_type="stuff",
             retriever=retriever,
             return_source_documents=True,
-        }
-    )
-
-    self.qa_chain = RetrievalQA.from_chain_type(
-        llm=self.llm,
-        chain_type="stuff",
-        retriever=retriever,
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": prompt}
-    )
+            chain_type_kwargs={"prompt": prompt}
+        )
 
     logger.info("QA chain initialized successfully")
 
