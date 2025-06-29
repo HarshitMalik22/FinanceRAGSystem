@@ -960,6 +960,13 @@ def add_documents_batch(self, file_paths: List[str], file_names: List[str] = Non
 # Initialize configuration
 config = Config()
 
+# Ensure vector store directory exists and is writable
+os.makedirs(config.VECTOR_STORE_DIR, exist_ok=True)
+try:
+    os.chmod(config.VECTOR_STORE_DIR, 0o777)  # Make writable
+except Exception as e:
+    logger.warning(f"Warning: Could not set permissions for {config.VECTOR_STORE_DIR}: {str(e)}")
+
 # Validate configuration
 if not config.GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY environment variable is not set or empty")
@@ -1145,17 +1152,8 @@ def upload_document():
             
         logger.info(f"File saved successfully. Size: {file_size} bytes")
         
-        # Clear existing vector store before adding new documents
-        logger.info("Clearing existing vector store")
-        try:
-            if rag_system.vector_store and hasattr(rag_system.vector_store, 'delete'):
-                # Get all document IDs and delete them
-                all_docs = rag_system.vector_store.get()
-                if all_docs and 'ids' in all_docs and all_docs['ids']:
-                    rag_system.vector_store.delete(ids=all_docs['ids'])
-                    logger.info(f"Deleted {len(all_docs['ids'])} existing documents from vector store")
-        except Exception as e:
-            logger.warning(f"Warning: Could not clear vector store: {str(e)}")
+        # No longer clearing the vector store to prevent data loss
+        logger.info("Adding new document to existing vector store")
         
         # Process the file
         logger.info(f"Processing file: {file.filename}")
@@ -1189,10 +1187,11 @@ def upload_document():
     finally:
         # Clean up temporary file
         try:
-            if os.path.exists(file_path):
+            if file_path and os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"Temporary file removed: {file_path}")
         except Exception as e:
+            logger.error(f"Error removing temporary file {file_path}: {str(e)}")
             logger.error(f"Error removing temporary file {file_path}: {str(e)}")
 
 # API endpoint to list documents
