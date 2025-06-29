@@ -564,11 +564,13 @@ class EnhancedRAGSystem:
                     google_api_key=self.config.GOOGLE_API_KEY
                 )
             
-            # Initialize Chroma with the new client API
+            # Initialize Chroma vector store with error handling and persistence
+            # Disable telemetry to avoid errors
             self.vector_store = Chroma(
                 persist_directory=self.config.VECTOR_STORE_DIR,
                 embedding_function=self.embeddings,
-                collection_name=self.config.VECTOR_STORE_COLLECTION
+                collection_name=self.config.VECTOR_STORE_COLLECTION,
+                anonymized_telemetry=False  # Explicitly disable telemetry
             )
             
             logger.info("Successfully initialized Chroma vector store")
