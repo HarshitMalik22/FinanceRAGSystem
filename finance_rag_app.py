@@ -552,9 +552,9 @@ class EnhancedRAGSystem:
                     if not google_api_key:
                         raise ValueError("GOOGLE_API_KEY not found in environment variables")
                     
-                    # Initialize Google Gemini
+                    # Initialize Google Gemini with updated model name
                     self.llm = ChatGoogleGenerativeAI(
-                        model="gemini-pro",
+                        model="gemini-1.5-pro",
                         google_api_key=google_api_key,
                         temperature=self.config.TEMPERATURE,
                         max_output_tokens=self.config.MAX_TOKENS
