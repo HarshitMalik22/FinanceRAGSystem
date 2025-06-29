@@ -914,7 +914,7 @@ def _build_cors_preflight_response():
 # Run the application
 if __name__ == "__main__":
     print("\n" + "="*60)
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get('PORT', 5000))
     print("🚀 Enhanced Finance RAG System Starting...")
     print("="*60)
     print(f"📊 LLM Provider: {config.LLM_PROVIDER}")
@@ -924,7 +924,7 @@ if __name__ == "__main__":
     print("="*60)
     
     try:
-        port = int(os.environ.get('PORT', 8080))  # Use PORT from environment or default to 8080
+        port = int(os.environ.get('PORT', 5000))  # Use PORT from environment or default to 5000
         app.run(
             debug=False,  # Set to False for production
             host='0.0.0.0',
