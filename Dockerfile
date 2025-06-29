@@ -32,6 +32,7 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --user "protobuf>=3.20.3,<4.0.0" && \
     pip install --no-cache-dir --user -r requirements.txt && \
     pip install --no-cache-dir --user langchain-chroma chromadb
 

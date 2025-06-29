@@ -8,6 +8,8 @@ services:
     plan: free
     runtime: python
     buildCommand: |
+      pip install --upgrade pip
+      pip install "protobuf>=3.20.3,<4.0.0"
       pip install -r requirements.txt
       python -m nltk.downloader popular
       python -m spacy download en_core_web_sm
