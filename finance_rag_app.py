@@ -183,7 +183,7 @@ class DocumentProcessor:
         
         if not os.path.exists(file_path):
             logger.error(f"File not found: {file_path}")
-            return None
+            return []
             
         # Check cache first
         file_hash = self._get_file_hash(file_path)
@@ -215,7 +215,7 @@ class DocumentProcessor:
             _, ext = os.path.splitext(file_path.lower())
             if ext not in loader_map:
                 logger.warning(f"Unsupported file type: {file_path}")
-                return None
+                return []
                 
             # Load documents with progress tracking
             start_time = time.time()
@@ -245,6 +245,8 @@ class DocumentProcessor:
             processed_docs = []
             for doc in docs:
                 try:
+                    if not hasattr(doc, 'metadata') or doc.metadata is None:
+                        doc.metadata = {}
                     doc.metadata.update({
                         'source': file_name,
                         'file_hash': file_hash,
@@ -253,10 +255,11 @@ class DocumentProcessor:
                     processed_docs.append(doc)
                 except Exception as meta_error:
                     logger.warning(f"Error adding metadata to document: {str(meta_error)}")
+                    processed_docs.append(doc)  # Still add the document
             
             if not processed_docs:
                 logger.warning(f"No valid documents found in {file_name}")
-                return None
+                return []
             
             # Cache the loaded documents if enabled
             if self.config.ENABLE_CACHING:
@@ -272,10 +275,14 @@ class DocumentProcessor:
             
         except Exception as e:
             logger.error(f"Error loading document {file_name}: {str(e)}", exc_info=True)
-            return None
+            return []
     
     def split_documents(self, documents: List[Document]) -> List[Document]:
         """Split documents into chunks with progress tracking."""
+        if not documents:
+            logger.warning("No documents provided for splitting")
+            return []
+            
         logger.info(f"Splitting {len(documents)} documents into chunks...")
         
         all_splits = []
@@ -326,6 +333,10 @@ class EnhancedRAGSystem:
                 google_api_key=self.config.GOOGLE_API_KEY
             )
             
+            # Test embeddings
+            test_embedding = self.embeddings.embed_query("test")
+            logger.info(f"Embeddings test successful. Vector dimension: {len(test_embedding)}")
+            
             # Initialize Google LLM
             logger.info("Initializing Google Generative AI LLM")
             self.llm = ChatGoogleGenerativeAI(
@@ -334,6 +345,10 @@ class EnhancedRAGSystem:
                 temperature=0.1,
                 max_tokens=1024
             )
+            
+            # Test LLM
+            test_response = self.llm.invoke("Hello, this is a test.")
+            logger.info(f"LLM test successful. Response: {test_response.content[:50]}...")
             
             logger.info("Successfully initialized LLM and embeddings")
             
@@ -344,13 +359,12 @@ class EnhancedRAGSystem:
     def _initialize_vector_store(self):
         """Initialize Chroma vector store in either local or server mode based on configuration."""
         try:
-            from chromadb.config import Settings
-            
             # Check if we should use ChromaDB server
             chroma_server_host = os.getenv("CHROMA_SERVER_HOST")
             
             if chroma_server_host:
                 # Server mode
+                from chromadb.config import Settings
                 chroma_server_port = os.getenv("CHROMA_SERVER_PORT", "8000")
                 chroma_server_ssl = os.getenv("CHROMA_SERVER_SSL", "false").lower() == "true"
                 
@@ -489,6 +503,8 @@ YOUR RESPONSE:"""
             "errors": []
         }
         
+        all_chunks = []
+        
         for file_path, file_name in zip(file_paths, file_names):
             try:
                 logger.info(f"Processing file: {file_name}")
@@ -505,8 +521,14 @@ YOUR RESPONSE:"""
                 # Split documents into chunks
                 chunks = self.document_processor.split_documents(documents)
                 
-                # Add to vector store
-                self.vector_store.add_documents(chunks)
+                if not chunks:
+                    error_msg = f"No chunks generated from {file_name}"
+                    logger.warning(error_msg)
+                    results["errors"].append({"file": file_name, "error": error_msg})
+                    continue
+                
+                # Add chunks to the batch
+                all_chunks.extend(chunks)
                 
                 # Update results
                 doc_count = len(chunks)
@@ -516,13 +538,51 @@ YOUR RESPONSE:"""
                 })
                 results["total_documents"] += doc_count
                 
-                logger.info(f"Successfully processed {file_name}: {doc_count} document chunks added")
+                logger.info(f"Successfully processed {file_name}: {doc_count} document chunks prepared")
                 
             except Exception as e:
                 error_msg = f"Error processing {file_name}: {str(e)}"
                 logger.error(error_msg, exc_info=True)
                 results["errors"].append({"file": file_name, "error": str(e)})
                 results["status"] = "partial_success"
+        
+        # Add all chunks to vector store in one batch
+        if all_chunks:
+            try:
+                logger.info(f"Adding {len(all_chunks)} chunks to vector store...")
+                
+                # Get initial count
+                try:
+                    initial_count = self.vector_store._collection.count()
+                    logger.info(f"Vector store initial count: {initial_count}")
+                except:
+                    initial_count = 0
+                    logger.warning("Could not get initial vector store count")
+                
+                # Add documents to vector store
+                self.vector_store.add_documents(all_chunks)
+                
+                # Verify documents were added
+                try:
+                    final_count = self.vector_store._collection.count()
+                    added_count = final_count - initial_count
+                    logger.info(f"Successfully added {added_count} documents to vector store. Total: {final_count}")
+                except:
+                    logger.warning("Could not verify document count after adding")
+                
+                # Force persistence if using local storage
+                if hasattr(self.vector_store, 'persist'):
+                    try:
+                        self.vector_store.persist()
+                        logger.info("Vector store persisted successfully")
+                    except Exception as persist_error:
+                        logger.warning(f"Could not persist vector store: {persist_error}")
+                
+            except Exception as e:
+                error_msg = f"Error adding documents to vector store: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                results["status"] = "error"
+                results["errors"].append({"general": error_msg})
         
         return results
 
@@ -538,6 +598,18 @@ YOUR RESPONSE:"""
         """
         try:
             logger.info(f"Processing query: {question}")
+            
+            # Check if vector store has any documents
+            try:
+                doc_count = self.vector_store._collection.count()
+                if doc_count == 0:
+                    return {
+                        "result": "No documents have been uploaded yet. Please upload some financial documents first to ask questions about them.",
+                        "source_documents": []
+                    }
+                logger.info(f"Vector store has {doc_count} documents available for querying")
+            except Exception as e:
+                logger.warning(f"Could not check document count: {e}")
             
             # Use the QA chain to get the answer
             result = self.qa_chain({"query": question})
