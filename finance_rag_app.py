@@ -586,7 +586,8 @@ class EnhancedRAGSystem:
                 self.vector_store = Chroma(
                     collection_name=self.config.VECTOR_STORE_COLLECTION,
                     embedding_function=self.embeddings,
-                    client_settings=chroma_server_settings
+                    client_settings=chroma_server_settings,
+                    anonymized_telemetry=False  # Explicitly disable telemetry
                 )
                 logger.info("Successfully connected to ChromaDB server")
                 
@@ -598,7 +599,8 @@ class EnhancedRAGSystem:
                 self.vector_store = Chroma(
                     persist_directory=self.config.VECTOR_STORE_DIR,
                     embedding_function=self.embeddings,
-                    collection_name=self.config.VECTOR_STORE_COLLECTION
+                    collection_name=self.config.VECTOR_STORE_COLLECTION,
+                    anonymized_telemetry=False  # Explicitly disable telemetry
                 )
                 logger.info("Successfully initialized local Chroma vector store")
             
