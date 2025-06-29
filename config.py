@@ -21,10 +21,10 @@ class Config:
     
     # Rate limiting and retry settings
     MAX_WORKERS: int = min(4, (os.cpu_count() or 2) * 2)  # Reduced workers to avoid rate limits
-    MAX_RETRIES: int = 5  # Increased max retries
-    REQUEST_TIMEOUT: int = 120  # Increased timeout to 120 seconds
-    RATE_LIMIT_DELAY: float = 2.0  # Base delay between requests in seconds
-    MAX_RATE_LIMIT_DELAY: float = 60.0  # Maximum delay between retries
+    MAX_RETRIES: int = 3  # Maximum number of retry attempts
+    REQUEST_TIMEOUT: int = 30  # Request timeout in seconds
+    RATE_LIMIT_DELAY: float = 1.0  # Initial delay in seconds
+    MAX_RATE_LIMIT_DELAY: float = 60.0  # Maximum delay in seconds
     RATE_LIMIT_BACKOFF_FACTOR: float = 2.0  # Exponential backoff factor
     
     # Application settings
