@@ -9,15 +9,19 @@ class Config:
     CHUNK_SIZE = 1500
     CHUNK_OVERLAP = 200
     
-    # API Key for Groq (should be set via environment variable)
+    # API Keys
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
     
     # Model configuration
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    GOOGLE_EMBEDDING_MODEL: str = os.getenv("GOOGLE_EMBEDDING_MODEL", "models/embedding-001")
     
     # Vector store configuration
-    VECTOR_STORE_DIR: str = os.getenv("VECTOR_STORE_DIR", "/app/chroma_db")
+    VECTOR_STORE_DIR: str = os.getenv("VECTOR_STORE_DIR", "./chroma_db")
     VECTOR_STORE_COLLECTION: str = os.getenv("VECTOR_STORE_COLLECTION", "financial_docs")
+    TOP_K_RETRIEVAL: int = int(os.getenv("TOP_K_RETRIEVAL", "4"))  # Number of documents to retrieve during RAG
     
     # Rate limiting and retry settings
     MAX_WORKERS: int = min(4, (os.cpu_count() or 2) * 2)  # Reduced workers to avoid rate limits
@@ -38,7 +42,7 @@ class Config:
     @classmethod
     def validate(cls) -> None:
         """Validate required configuration."""
-        required_vars = ["GROQ_API_KEY"]
+        required_vars = ["GROQ_API_KEY", "GOOGLE_API_KEY"]
         missing = [var for var in required_vars if not getattr(cls, var)]
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")

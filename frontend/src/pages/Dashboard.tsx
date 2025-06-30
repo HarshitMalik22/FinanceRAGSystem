@@ -84,15 +84,34 @@ const Dashboard: React.FC = () => {
 
   const { data: queryResult, refetch: executeQuery, isLoading: isQueryLoading, error: queryError } = useQuery<QueryResponse>({
     queryKey: ['query', query],
-    queryFn: () => api.query(query),
+    queryFn: async () => {
+      try {
+        const response = await api.query(query);
+        return response;
+      } catch (error: any) {
+        // Log detailed error for debugging
+        console.error('Query API Error:', error);
+        
+        // Extract error message from response if available
+        const errorMessage = error?.response?.data?.error || 
+                           error?.message || 
+                           'Failed to process your question. Please try again.';
+        
+        // Show error to user
+        showSnackbar(errorMessage, 'error');
+        
+        // Re-throw to be caught by React Query
+        throw new Error(errorMessage);
+      }
+    },
     enabled: false,
     retry: false,
   });
 
   React.useEffect(() => {
     if (queryError) {
-      showSnackbar('Error executing query', 'error');
-      console.error('Query error:', queryError);
+      // We already show the error in the queryFn, but we can add additional handling here if needed
+      console.error('Query error effect:', queryError);
     }
   }, [queryError]);
   

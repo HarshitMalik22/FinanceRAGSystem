@@ -344,8 +344,12 @@ class EnhancedRAGSystem:
         self.cache_lock = threading.Lock()
     
     def _initialize_llm_and_embeddings(self):
-        """Initialize LLM and embeddings with proper error handling."""
+        """Initialize Groq LLM with rate limiting and retry logic."""
         try:
+            from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+            import requests
+            from groq import Groq
+            
             # Initialize Google embeddings
             logger.info(f"Initializing Google embeddings with model: {self.config.GOOGLE_EMBEDDING_MODEL}")
             self.embeddings = GoogleGenerativeAIEmbeddings(
@@ -357,24 +361,57 @@ class EnhancedRAGSystem:
             test_embedding = self.embeddings.embed_query("test")
             logger.info(f"Embeddings test successful. Vector dimension: {len(test_embedding)}")
             
-            # Initialize Google LLM
-            logger.info("Initializing Google Generative AI LLM")
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-pro",
-                google_api_key=self.config.GOOGLE_API_KEY,
-                temperature=0.1,
-                max_tokens=1024
+            # Configure retry decorator for API calls
+            def create_retry_decorator():
+                return retry(
+                    stop=stop_after_attempt(self.config.MAX_RETRIES),
+                    wait=wait_exponential(
+                        multiplier=self.config.RATE_LIMIT_BACKOFF_FACTOR,
+                        min=self.config.RATE_LIMIT_DELAY,
+                        max=self.config.MAX_RATE_LIMIT_DELAY
+                    ),
+                    retry=retry_if_exception_type(requests.exceptions.HTTPError),
+                    before_sleep=lambda retry_state: logger.warning(
+                        f"Rate limited. Retrying in {retry_state.next_action.sleep:.1f} seconds... "
+                        f"(attempt {retry_state.attempt_number}/{self.config.MAX_RETRIES})"
+                    )
+                )
+            
+            @create_retry_decorator()
+            def initialize_groq():
+                logger.info(f"Initializing Groq LLM with model: {self.config.GROQ_MODEL}")
+                # Import ChatGroq from langchain_groq
+                from langchain_groq import ChatGroq
+                
+                # Initialize the ChatGroq LLM wrapper
+                llm = ChatGroq(
+                    api_key=self.config.GROQ_API_KEY,
+                    model_name=self.config.GROQ_MODEL,
+                    temperature=0.1,
+                    max_tokens=4000,
+                    request_timeout=self.config.REQUEST_TIMEOUT
+                )
+                
+                # Test the connection with a lightweight request
+                try:
+                    llm.invoke("Hello")
+                    logger.info(f"Successfully connected to {self.config.GROQ_MODEL}")
+                    return llm
+                except Exception as e:
+                    logger.error(f"Failed to connect to Groq: {str(e)}")
+                    raise
+            
+            self.llm = initialize_groq()
+            
+            # Initialize embeddings using Google's API
+            self.embeddings = GoogleGenerativeAIEmbeddings(
+                model=self.config.GOOGLE_EMBEDDING_MODEL,
+                google_api_key=self.config.GOOGLE_API_KEY
             )
             
-            # Test LLM
-            test_response = self.llm.invoke("Hello, this is a test.")
-            logger.info(f"LLM test successful. Response: {test_response.content[:50]}...")
-            
-            logger.info("Successfully initialized LLM and embeddings")
-            
         except Exception as e:
-            logger.error(f"Failed to initialize LLM and embeddings: {str(e)}")
-            raise ValueError("Failed to initialize LLM and embeddings. Please check your API keys.")
+            logger.error(f"Failed to initialize Groq LLM after {self.config.MAX_RETRIES} attempts: {str(e)}")
+            raise ValueError("Failed to initialize Groq LLM. Please check your GROQ_API_KEY and try again.")
     
     def _initialize_vector_store(self):
         """Initialize Chroma vector store in either local or server mode based on configuration."""
@@ -763,13 +800,21 @@ def query_documents():
         if not data or 'question' not in data:
             error_msg = "No question provided in request body"
             logger.error(error_msg)
-            return jsonify({"error": error_msg}), 400
+            response = jsonify({"error": error_msg})
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+            return response, 400
             
         question = data.get('question', '').strip()
         if not question:
             error_msg = "Question cannot be empty"
             logger.error(error_msg)
-            return jsonify({"error": error_msg}), 400
+            response = jsonify({"error": error_msg})
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+            return response, 400
             
         logger.info(f"Processing question: {question}")
         
@@ -782,11 +827,19 @@ def query_documents():
         logger.info(f"Query processed successfully in {result['processing_time_seconds']}s")
         logger.info("-" * 80 + "\n")
         
-        return jsonify(result), 200
+        response = jsonify(result)
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response, 200
         
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
-        return jsonify({"error": f"Failed to process query: {str(e)}"}), 500
+        response = jsonify({"error": f"Failed to process query: {str(e)}"})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response, 500
 
 # API endpoint to delete a document
 @app.route('/api/documents/<document_id>', methods=['DELETE', 'OPTIONS'])
